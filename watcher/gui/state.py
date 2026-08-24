@@ -8,11 +8,13 @@ import json
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..config import EVENTS_FILE, read_control, load_watched_dirs, load_events_summary
 from ..git import project_name, is_git_repo
-from ..review import rate_limit_status
+from ..review import rate_limit_status, rate_limit_buckets
+
+DAILY_TREND_DAYS = 14
 
 FEED_LIMIT = 60
 
@@ -129,9 +131,20 @@ class WatcherState:
         paused_projects = set(control["paused_projects"])
         projects = self.current_projects()
         reviews_this_hour, reviews_hour_limit = rate_limit_status()
+        hourly_trend = rate_limit_buckets()
         today = datetime.now().strftime("%Y-%m-%d")
         with self.lock:
             today_stats = self.daily_counts.get(today, {"total": 0, "critical": 0, "cost_usd": 0.0})
+            # Serie real (nao inventada) para o sparkline de "Total historico":
+            # contagem de revisoes por dia, do mais antigo pro mais recente,
+            # com zero nos dias sem nenhuma revisao.
+            daily_trend = [
+                self.daily_counts.get(
+                    (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d"),
+                    {"total": 0},
+                )["total"]
+                for i in range(DAILY_TREND_DAYS - 1, -1, -1)
+            ]
             return {
                 "uptime": time.time() - self.started_at,
                 "paused": paused,
@@ -144,6 +157,8 @@ class WatcherState:
                 "review_seconds": self.review_seconds,
                 "reviews_this_hour": reviews_this_hour,
                 "reviews_hour_limit": reviews_hour_limit,
+                "hourly_trend": hourly_trend,
+                "daily_trend": daily_trend,
                 "today_total": today_stats["total"],
                 "today_critical": today_stats["critical"],
                 "today_cost_usd": today_stats.get("cost_usd", 0.0),

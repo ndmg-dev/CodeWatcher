@@ -178,6 +178,23 @@
   .stat .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
   #s-today-cost, #s-total-cost { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
 
+  .spark { display: block; margin-top: 6px; overflow: visible; }
+  .spark-line {
+    fill: none; stroke: var(--muted); stroke-width: 1.5;
+    stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 1; stroke-dashoffset: 1;
+    animation: spark-draw .9s ease-out forwards;
+  }
+  @keyframes spark-draw { to { stroke-dashoffset: 0; } }
+  .spark-dot {
+    fill: var(--accent);
+    animation: spark-pulse 2.2s ease-in-out infinite;
+  }
+  @keyframes spark-pulse {
+    0%, 100% { r: 2.2; opacity: 1; }
+    50% { r: 3.2; opacity: .55; }
+  }
+
   /* ---------- feed ---------- */
   main { display: flex; flex-direction: column; overflow: hidden; }
   header {
@@ -333,6 +350,7 @@
         <div class="k">Total histórico</div>
         <div class="v" id="s-total">0</div>
         <small id="s-total-cost"></small>
+        <div id="spark-total"></div>
       </div>
     </div>
     <div class="stat">
@@ -342,6 +360,7 @@
       <div class="body">
         <div class="k">Tempo em revisão</div>
         <div class="v" id="s-time">0s</div>
+        <div id="spark-time"></div>
       </div>
     </div>
     <div class="stat">
@@ -351,6 +370,7 @@
       <div class="body">
         <div class="k">Revisões nesta hora</div>
         <div class="v" id="s-rate">0/0</div>
+        <div id="spark-rate"></div>
       </div>
     </div>
     <div class="stat">
@@ -497,6 +517,39 @@ function fmtUsd(v) {
   return "$" + (v < 0.01 ? v.toFixed(4) : v.toFixed(2));
 }
 
+/* Sparkline com dados reais (nunca inventados) — 2px de padding vertical,
+   pathLength="1" deixa a animacao de "desenhar a linha" exata independente
+   do comprimento geometrico real do path. */
+function sparklineSvg(values, w, h) {
+  if (!values || values.length < 2) return "";
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = (max - min) || 1;
+  const step = w / (values.length - 1);
+  const pts = values.map((v, i) => [
+    i * step,
+    h - 2 - ((v - min) / range) * (h - 4),
+  ]);
+  const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`
+    + `<path class="spark-line" pathLength="1" d="${d}"/>`
+    + `<circle class="spark-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.2"/>`
+    + `</svg>`;
+}
+
+/* So redesenha (e reanima) quando os valores realmente mudaram — senao o
+   tick de 1s reconstruiria o SVG toda hora e a animacao nunca pararia de
+   reiniciar. */
+function renderSparkline(elId, values) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const key = JSON.stringify(values);
+  if (el.dataset.k === key) return;
+  el.dataset.k = key;
+  el.innerHTML = sparklineSvg(values, 96, 22);
+}
+
 let lastRenderKey = "";
 let activeProjectFilter = null;
 let searchQuery = "";
@@ -583,6 +636,14 @@ function render(state) {
   document.getElementById("s-total-cost").textContent = state.total_cost_usd
     ? "≈ " + fmtUsd(state.total_cost_usd) + " total (OpenAI, estimado)"
     : "";
+  renderSparkline("spark-total", state.daily_trend);
+  renderSparkline("spark-rate", state.hourly_trend);
+  const recentDurations = state.feed
+    .filter(c => c.status === "done" && c.duration != null)
+    .slice(0, 12)
+    .reverse()
+    .map(c => c.duration);
+  renderSparkline("spark-time", recentDurations);
   document.getElementById("s-time").textContent = fmtDuration(state.review_seconds);
   const rateEl = document.getElementById("s-rate");
   rateEl.textContent = state.reviews_this_hour + "/" + state.reviews_hour_limit;

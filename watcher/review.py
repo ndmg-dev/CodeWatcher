@@ -52,6 +52,24 @@ def rate_limit_status():
         return len(_call_times), limit
 
 
+def rate_limit_buckets(n=12):
+    """Chamadas reais na ultima hora, divididas em N baldes iguais (5min cada
+    com o default), do mais antigo (indice 0) para o mais recente — usado
+    so para o sparkline do painel, nao afeta a decisao do rate limit."""
+    now = time.time()
+    bucket_seconds = _RATE_WINDOW_SECONDS / n
+    buckets = [0] * n
+    with _rate_lock:
+        times = list(_call_times)
+    for t in times:
+        age = now - t
+        if age > _RATE_WINDOW_SECONDS:
+            continue
+        idx_from_now = min(n - 1, int(age // bucket_seconds))
+        buckets[n - 1 - idx_from_now] += 1
+    return buckets
+
+
 def _extract_severity(review_text):
     """Le a linha 'SEVERIDADE: alta|media|baixa' pedida no prompt (primeira
     linha nao vazia da resposta) e a remove do texto exibido. Se o modelo
