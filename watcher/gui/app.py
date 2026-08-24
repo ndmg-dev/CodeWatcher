@@ -210,20 +210,16 @@ class App:
     def show_window(self, *_):
         if not self.window:
             return
-        try:
-            import ctypes
-            hwnd = ctypes.windll.user32.FindWindowW(None, "Code Watcher")
-            if hwnd:
-                self._force_icon(hwnd)
-        except Exception:
-            pass
-        self.window.show()
-        try:
-            self.window.restore()
-        except Exception:
-            pass
-        if self._win_pos is not None:
-            self._force_show_at(*self._win_pos)
+        # NAO chamar self.window.show()/self.window.restore() (API do pywebview)
+        # aqui: elas fazem Invoke sincrono na thread da UI do WinForms, e essa
+        # thread pode ainda estar ocupada inicializando o WebView2 quando esta
+        # funcao roda (ela e chamada de uma thread de fundo, 2s apos a criacao
+        # da janela) — mesma classe de problema que o _force_icon ja teve com
+        # SendMessageW (sincrono) travando a janela de verdade. Ir direto no
+        # Win32 (ShowWindow + SetWindowPos com SWP_SHOWWINDOW) evita esse
+        # deadlock porque nao depende do loop de mensagens do WinForms.
+        pos = self._win_pos if self._win_pos is not None else (None, None)
+        self._force_show_at(*pos)
 
     def _force_show_at(self, x, y):
         try:
@@ -234,15 +230,20 @@ class App:
                 log("  ! _force_show_at: janela 'Code Watcher' nao encontrada")
                 return
             SW_RESTORE = 9
-            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SWP_NOMOVE = 0x0001, 0x0004, 0x0040, 0x0002
             user32.ShowWindow(hwnd, SW_RESTORE)
-            user32.SetWindowPos(
-                hwnd, None, x, y, 0, 0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
-            )
+            flags = SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW
+            moved = x is not None and y is not None
+            if not moved:
+                flags |= SWP_NOMOVE
+                x = y = 0
+            user32.SetWindowPos(hwnd, None, x, y, 0, 0, flags)
             user32.SetForegroundWindow(hwnd)
             self._force_icon(hwnd)
-            log(f"  = janela restaurada e movida para ({x}, {y}) via Win32")
+            if moved:
+                log(f"  = janela restaurada e movida para ({x}, {y}) via Win32")
+            else:
+                log("  = janela restaurada via Win32")
         except Exception as exc:
             log(f"  ! _force_show_at falhou: {exc}")
 
