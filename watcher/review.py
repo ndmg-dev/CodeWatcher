@@ -1,8 +1,10 @@
+import collections
 import os
+import threading
 import time
 from datetime import datetime
 
-from .config import MAX_DIFF_CHARS, REVIEW_LOG_NAME, read_control
+from .config import MAX_DIFF_CHARS, MAX_REVIEWS_PER_HOUR, REVIEW_LOG_NAME, read_control
 from .git import (
     project_name, get_diff, get_commit_diff, get_pr_diff,
     read_ref_sha, load_seen_commits, mark_commit_seen,
@@ -12,6 +14,34 @@ from .llm import (
     PROMPT_TEMPLATE, PROMPT_TEMPLATE_COMMIT, PROMPT_TEMPLATE_PR, call_llm,
 )
 from .logger import log, emit_event
+
+_RATE_WINDOW_SECONDS = 3600
+_rate_lock = threading.Lock()
+_call_times = collections.deque()
+
+
+def _allow_review():
+    """Sliding window de MAX_REVIEWS_PER_HOUR chamadas por hora, somando todos
+    os projetos. Reserva a vaga (registra o timestamp) na mesma chamada que
+    aprova, para nao deixar brecha de corrida entre checar e consumir.
+    Em memoria, nao persiste entre reinicios do watcher."""
+    now = time.time()
+    with _rate_lock:
+        while _call_times and now - _call_times[0] > _RATE_WINDOW_SECONDS:
+            _call_times.popleft()
+        if len(_call_times) >= MAX_REVIEWS_PER_HOUR:
+            return False
+        _call_times.append(now)
+        return True
+
+
+def rate_limit_status():
+    """(usadas, limite) na janela atual de 1h — para o painel exibir."""
+    now = time.time()
+    with _rate_lock:
+        while _call_times and now - _call_times[0] > _RATE_WINDOW_SECONDS:
+            _call_times.popleft()
+        return len(_call_times), MAX_REVIEWS_PER_HOUR
 
 
 def review_with_llm(repo_root, prompt_template, diff, **fields):
@@ -46,6 +76,11 @@ def process_file(repo_root, file_path):
     diff = get_diff(repo_root, file_path)
     if not diff.strip():
         log(f"  - {rel_path}: sem mudancas vs HEAD, ignorando.")
+        return
+
+    if not _allow_review():
+        log(f"  - {rel_path}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        emit_event("review_failed", project=project, file=rel_path, reason="rate_limit")
         return
 
     log(f"  > analisando {rel_path} ({len(diff)} chars de diff)...")
@@ -98,6 +133,13 @@ def process_ref_update(repo_root, branch):
         return
 
     label = f"commit {sha[:7]} ({branch})"
+
+    if not _allow_review():
+        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        emit_event("review_failed", project=project, file=label, source="commit",
+                   reason="rate_limit")
+        return
+
     log(f"  > analisando {label} ({len(diff)} chars)...")
     emit_event("review_start", project=project, file=label, source="commit",
                diff_chars=len(diff))
@@ -147,6 +189,13 @@ def process_pr(repo_root, pr):
         return
 
     label = f"PR #{number} — {title}"
+
+    if not _allow_review():
+        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        emit_event("review_failed", project=project, file=label, source="pr",
+                   reason="rate_limit")
+        return
+
     log(f"  > analisando {label} ({len(diff)} chars)...")
     emit_event("review_start", project=project, file=label, source="pr",
                diff_chars=len(diff))
@@ -179,6 +228,12 @@ def retry_commit_review(repo_root, sha):
     if diff is None or not diff.strip():
         log(f"  ! retry {label}: sem diff ou 'git show' falhou.")
         emit_event("review_failed", project=project, file=label, source="commit")
+        return False
+
+    if not _allow_review():
+        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando (retry manual).")
+        emit_event("review_failed", project=project, file=label, source="commit",
+                   reason="rate_limit")
         return False
 
     log(f"  > re-analisando {label} ({len(diff)} chars, retry manual)...")

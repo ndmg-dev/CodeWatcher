@@ -32,10 +32,26 @@ GH_TIMEOUT = 30
 REVIEW_LOG_NAME = "review-log.md"
 MAX_DIFF_CHARS = 12000
 
+# Teto de chamadas ao provedor de LLM (Claude CLI ou API da OpenAI) por hora,
+# somando todos os projetos monitorados. Protege contra custo/uso descontrolado
+# (ex: um repo barulhento, ou um bug de loop) — quando atingido, revisoes sao
+# puladas (log + evento "review_failed" com reason="rate_limit") ate a janela
+# de 1h abrir espaco de novo. Nao persiste entre reinicios do watcher.
+MAX_REVIEWS_PER_HOUR = 30
+
+# Rotacao do events.jsonl: acima de EVENTS_MAX_BYTES, os eventos mais antigos
+# sao resumidos (contagem total e por projeto) em events_summary.json e
+# removidos do arquivo, mantendo so os ultimos EVENTS_KEEP_LINES para o feed.
+# O "Total historico" do painel continua correto porque soma o resumo +
+# o que ainda esta no arquivo.
+EVENTS_MAX_BYTES = 5 * 1024 * 1024
+EVENTS_KEEP_LINES = 2000
+
 STATE_DIR = os.path.join(
     os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "CodeWatcher"
 )
 EVENTS_FILE = os.path.join(STATE_DIR, "events.jsonl")
+EVENTS_SUMMARY_FILE = os.path.join(STATE_DIR, "events_summary.json")
 CONTROL_FILE = os.path.join(STATE_DIR, "control.json")
 PROJECTS_FILE = os.path.join(STATE_DIR, "projects.json")
 SEEN_COMMITS_FILE = os.path.join(STATE_DIR, "seen_commits.json")
@@ -96,3 +112,23 @@ def save_watched_dirs(dirs):
         json.dump([os.path.abspath(path) for path in dirs], fh,
                   ensure_ascii=False, indent=2)
     os.replace(tmp, PROJECTS_FILE)
+
+def load_events_summary():
+    """Contadores arquivados por rotate_events_if_needed() (eventos antigos ja
+    removidos de events.jsonl). {} se nunca rotacionou ainda."""
+    try:
+        with open(EVENTS_SUMMARY_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {"total_count": 0, "per_project": {}}
+    return {
+        "total_count": int(data.get("total_count", 0)),
+        "per_project": dict(data.get("per_project", {})),
+    }
+
+def save_events_summary(summary):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = EVENTS_SUMMARY_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, EVENTS_SUMMARY_FILE)

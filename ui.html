@@ -265,6 +265,10 @@
       <div class="k">Tempo em revisao</div>
       <div class="v" id="s-time">0s</div>
     </div>
+    <div class="stat">
+      <div class="k">Revisoes nesta hora</div>
+      <div class="v" id="s-rate">0/0</div>
+    </div>
   </div>
 </aside>
 
@@ -452,6 +456,9 @@ function render(state) {
   document.getElementById("s-session").textContent = state.session_count;
   document.getElementById("s-total").textContent = state.total_count;
   document.getElementById("s-time").textContent = fmtDuration(state.review_seconds);
+  const rateEl = document.getElementById("s-rate");
+  rateEl.textContent = state.reviews_this_hour + "/" + state.reviews_hour_limit;
+  rateEl.style.color = state.reviews_this_hour >= state.reviews_hour_limit ? "var(--danger, #e05555)" : "";
 
   /* feed */
   const visibleFeed = activeProjectFilter

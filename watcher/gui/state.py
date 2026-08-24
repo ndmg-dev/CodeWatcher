@@ -9,8 +9,9 @@ import os
 import threading
 import time
 
-from ..config import EVENTS_FILE, read_control, load_watched_dirs
+from ..config import EVENTS_FILE, read_control, load_watched_dirs, load_events_summary
 from ..git import project_name, is_git_repo
+from ..review import rate_limit_status
 
 FEED_LIMIT = 60
 
@@ -21,10 +22,14 @@ class WatcherState:
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.feed = []
-        self.total_count = 0
+        summary = load_events_summary()
+        # Baseline vinda de events.jsonl ja rotacionado (eventos antigos
+        # arquivados como contagem em events_summary.json) — sem isso o
+        # "Total historico" do painel voltaria a zero a cada rotacao.
+        self.total_count = summary["total_count"]
+        self.per_project = dict(summary["per_project"])
         self.session_count = 0
         self.review_seconds = 0.0
-        self.per_project = {}
         self.reviewing = False
         self._seq = 0
 
@@ -105,6 +110,7 @@ class WatcherState:
         paused = control["paused"]
         paused_projects = set(control["paused_projects"])
         projects = self.current_projects()
+        reviews_this_hour, reviews_hour_limit = rate_limit_status()
         with self.lock:
             return {
                 "uptime": time.time() - self.started_at,
@@ -114,6 +120,8 @@ class WatcherState:
                 "session_count": self.session_count,
                 "total_count": self.total_count,
                 "review_seconds": self.review_seconds,
+                "reviews_this_hour": reviews_this_hour,
+                "reviews_hour_limit": reviews_hour_limit,
                 "llm_provider": control.get("llm_provider", "claude"),
                 "openai_api_key": control.get("openai_api_key", ""),
                 "openai_model": control.get("openai_model", "gpt-4o"),

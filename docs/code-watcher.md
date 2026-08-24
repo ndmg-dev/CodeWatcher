@@ -1,7 +1,8 @@
 # Code Watcher — documentação do projeto
 
-> Revisão automática de código enquanto o Claude Code trabalha em outras tarefas.
-> Última atualização: **2026-08-24** (correção do bug dos terminais piscando)
+> Revisão automática de código enquanto você trabalha em outras tarefas.
+> Última atualização: **2026-08-24** (refactor em pacote `watcher/`, correção
+> de deadlock na janela, rate limit de revisões, rotação de `events.jsonl`)
 
 ---
 
@@ -14,8 +15,9 @@ por três fontes:
 **1. Arquivo salvo com mudança não commitada:**
 1. Espera ~3s de silêncio (debounce), para não disparar a cada `Ctrl+S`.
 2. Roda `git diff HEAD -- <arquivo>`.
-3. Manda o diff para o **Claude Code CLI** (`claude -p`) pedindo revisão
-   focada em bugs e melhorias.
+3. Manda o diff para o **provedor de LLM configurado** (Claude Code CLI, via
+   `claude -p`, ou API da OpenAI — escolha feita no painel, em
+   "⚙️ Configurações") pedindo revisão focada em bugs e melhorias.
 
 **2. Commit novo:**
 1. Git escreve o novo hash em `.git/refs/heads/<branch>` a cada commit — um
@@ -46,11 +48,26 @@ O projeto foi construído em quatro etapas: o watcher de linha de comando
 
 ## 2. Arquivos
 
+Desde o refactor de 2026-08-24, a lógica mora em pacote (`watcher/`);
+`code_watcher.py` e `watcher_gui.py` na raiz viraram pontos de entrada finos
+que só importam de lá, mantidos por compatibilidade com o fluxo de uso
+(`python code_watcher.py`, `pythonw watcher_gui.py`).
+
 | Arquivo | Papel |
 |---|---|
-| `code_watcher.py` | Motor. Monitoramento (watchdog), debounce, git diff, chamada ao CLI, escrita do `review-log.md`, emissão de eventos. Roda sozinho no terminal. |
-| `watcher_gui.py` | App de bandeja. Gerencia o `code_watcher.py` como subprocesso, lê os eventos, serve a API para o painel. |
+| `code_watcher.py` | Ponto de entrada do CLI. `sys.exit(watcher.monitor.main())`. |
+| `watcher_gui.py` | Ponto de entrada da GUI. `sys.exit(watcher.gui.app.run_gui())`. |
+| `watcher/config.py` | Constantes, `control.json`/`projects.json`/resumo de eventos (leitura/escrita). |
+| `watcher/git.py` | Chamadas a `git`/`gh`, bookkeeping de commits/PRs já vistos, descoberta de repositórios. |
+| `watcher/llm.py` | Prompts de revisão e os dois provedores (`call_claude`, `call_openai`), roteados por `call_llm`. |
+| `watcher/logger.py` | `log()` (escreve em `watcher.log`, sem depender de stdout) e `emit_event()` (com rotação de `events.jsonl`). |
+| `watcher/monitor.py` | Motor: watchdog, debounce, fila serializada, polling de PRs, `main(stop_event=...)`. |
+| `watcher/review.py` | Pipelines de revisão (arquivo/commit/PR/retry), rate limit de chamadas ao LLM. |
+| `watcher/gui/app.py` | Janela pywebview, ponte JS↔Python, tray icon, ciclo de vida da GUI. |
+| `watcher/gui/state.py` | `WatcherState` — agrega eventos em memória para o painel consultar. |
+| `watcher/gui/tray.py` | Ícone da bandeja e menu. |
 | `ui.html` | Todo o visual do painel (HTML/CSS/JS). Separado de propósito — mexer na aparência não arrisca a lógica. |
+| `smoke_test.ps1` | Abre a GUI N vezes seguidas e confere se trava — rodar depois de mudanças em `watcher_gui.py`/`watcher/gui/*.py`. |
 | `docs/code-watcher.md` | Este documento. |
 | `watcher-spec.md`, `watcher-gui-spec.md`, `watcher-gui-prompt.md` | Especificações originais. |
 
@@ -61,8 +78,9 @@ Em `%LOCALAPPDATA%\CodeWatcher\`:
 | Arquivo | Conteúdo |
 |---|---|
 | `projects.json` | **Fonte da verdade** da lista de pastas monitoradas. Editado pelo painel. |
-| `events.jsonl` | Log append-only de eventos. Alimenta o feed e o total histórico. |
-| `control.json` | Estado de pausa (geral e por pasta). |
+| `events.jsonl` | Log append-only de eventos. Alimenta o feed e o total histórico. Rotacionado automaticamente acima de 5MB (ver seção 4, "Rotação de `events.jsonl`"). |
+| `events_summary.json` | Contagem (total e por projeto) dos eventos já rotacionados/removidos de `events.jsonl`. Gerado automaticamente, não editar à mão. |
+| `control.json` | Estado de pausa (geral e por pasta) + provedor de LLM escolhido (Claude ou OpenAI) e credenciais da OpenAI. |
 | `watcher.log` | Saída do console do watcher (que não aparece mais, já que roda oculto). |
 
 ---
@@ -70,23 +88,32 @@ Em `%LOCALAPPDATA%\CodeWatcher\`:
 ## 3. Arquitetura
 
 ```
-watcher_gui.py  (pythonw, thread principal = janela pywebview)
+watcher_gui.py  (pythonw, thread principal = janela pywebview, via watcher/gui/app.py)
    │
-   ├── inicia code_watcher.py como subprocesso oculto
-   │      └── amarrado por um Job Object do Windows
-   │          (morre junto se a GUI cair)
+   ├── inicia watcher.monitor.main() numa thread do mesmo processo
+   │      (não mais subprocesso — necessário para funcionar dentro do
+   │       .exe empacotado --onefile; encerramento cooperativo via
+   │       threading.Event, não Job Object)
    │
    ├── thread: tail de events.jsonl  ──► estado em memória ──► painel
    ├── thread: pystray (ícone da bandeja + menu)
    └── thread: atualiza o ícone conforme o estado
 
-code_watcher.py
+watcher/monitor.py (watcher/review.py, watcher/git.py, watcher/llm.py)
    ├── watchdog observa as pastas do projects.json
    ├── debounce 3s por arquivo
    ├── fila serializada (uma revisão por vez)
-   ├── git diff HEAD ──► claude -p ──► review-log.md
-   └── emit_event() ──► events.jsonl
+   ├── rate limit: no máx. MAX_REVIEWS_PER_HOUR chamadas ao LLM por hora
+   ├── git diff HEAD ──► call_llm (Claude CLI ou API OpenAI) ──► review-log.md
+   └── emit_event() ──► events.jsonl (rotacionado acima de 5MB)
 ```
+
+> **Nota histórica:** até 2026-08-24, `code_watcher.py` rodava como
+> **subprocesso** da GUI, amarrado a um **Job Object** do Windows
+> (`KILL_ON_JOB_CLOSE`) para não sobrar órfão se a GUI caísse. Isso foi
+> removido quando o motor virou thread do mesmo processo — o próprio
+> processo morrer já encerra a thread, e o Job Object não fazia mais
+> sentido nesse modelo. Ver seção 4 do `docs/context/HANDOFF-2.md`.
 
 ### Comunicação entre os dois processos
 
@@ -364,7 +391,7 @@ confirmação. **Não apaga nada do disco** — o `review-log.md` continua lá.
 
 Clicar no **nome** da pasta pausa/retoma só ela.
 
-### Demais ajustes — constantes no topo do `code_watcher.py`
+### Demais ajustes — constantes no topo do `watcher/config.py`
 
 | Constante | Padrão | O que faz |
 |---|---|---|
@@ -380,6 +407,9 @@ Clicar no **nome** da pasta pausa/retoma só ela.
 | `GH_CMD` | `"gh"` | Comando do GitHub CLI, usado só para ler PRs |
 | `PR_POLL_SECONDS` | `300` | Intervalo entre checagens de PR por repositório |
 | `GH_TIMEOUT` | `30` | Timeout de cada comando `gh` |
+| `MAX_REVIEWS_PER_HOUR` | `30` | Teto de chamadas ao LLM por hora, somando todos os projetos (ver seção 4) |
+| `EVENTS_MAX_BYTES` | `5 MB` | Tamanho do `events.jsonl` que dispara rotação (ver seção 4) |
+| `EVENTS_KEEP_LINES` | `2000` | Linhas recentes mantidas em `events.jsonl` após rotação |
 
 ---
 
@@ -604,8 +634,6 @@ cenário simulado.
 
 ## 9. Limitações conhecidas
 
-- **`events.jsonl` cresce indefinidamente.** É a fonte do total histórico. Se
-  incomodar, dá para rotacionar guardando só os contadores.
 - **"Tempo economizado" não foi implementado** — seria fórmula inventada. No
   lugar: uptime e tempo real gasto em revisões, ambos medidos.
 - **Revisão em andamento é perdida** ao adicionar/remover pasta (restart do
@@ -647,6 +675,10 @@ cenário simulado.
   acontecerem no mesmo PR dentro do intervalo de 5 minutos, só o mais
   recente é revisado — mesma simplificação já aceita para commits e
   arquivos.
+- **Rate limit (30 revisões/hora) é em memória, não persiste entre
+  reinícios do watcher.** Um commit ou PR pulado por rate limit não é
+  marcado como "visto" — só é revisado de novo se o ref mudar de novo, ou
+  via "Revisar novamente" no painel.
 
 ---
 
@@ -674,6 +706,56 @@ tudo mais") — quebrada em fases:
     **não** precisou crescer para `{"path":, "sources": [...]}` — o escopo
     de quem participa do polling é derivado automaticamente de
     `has_github_remote()` por repositório, sem configuração extra.
+
+### Rate limit de revisões (2026-08-24)
+
+Com 12 projetos monitorados e um provedor de LLM pago por token (API da
+OpenAI, opção adicionada nesta mesma sessão), um repositório barulhento ou
+um bug de loop poderiam gerar chamadas em excesso sem nenhum aviso.
+
+`review.py` mantém uma janela deslizante em memória (`_call_times`, thread-safe)
+com as chamadas ao LLM na última hora, somando **todos** os projetos. Acima
+de `MAX_REVIEWS_PER_HOUR` (30, constante em `watcher/config.py`), revisões
+novas são puladas: log em `watcher.log` + evento `review_failed` com
+`reason="rate_limit"`, sem chamar o provedor. O painel mostra
+"Revisões nesta hora: X/30" na barra lateral.
+
+**Efeitos aceitos:** o contador não persiste entre reinícios do watcher
+(reseta a cada troca de pasta monitorada, que já reinicia o processo). Um
+commit ou PR pulado por rate limit não fica marcado como "visto" — só é
+revisado de novo se o ref mudar de novo, ou via o botão "Revisar novamente".
+Chamado de arquivo (`process_file`) não tem esse problema porque reavalia o
+diff a cada save.
+
+### Rotação de `events.jsonl` (2026-08-24)
+
+Limitação conhecida desde o início do projeto (seção 9): o log de eventos
+cresce para sempre, sendo a fonte tanto do feed em tempo real quanto do
+"Total histórico" exibido no painel.
+
+Resolvido com `_rotate_events_if_needed()` em `watcher/logger.py`: antes de
+cada `emit_event()`, se `events.jsonl` já passou de `EVENTS_MAX_BYTES` (5MB),
+os eventos mais antigos são resumidos (contagem total e por projeto) em
+`events_summary.json` e removidos do arquivo, mantendo só os últimos
+`EVENTS_KEEP_LINES` (2000) para o feed continuar mostrando histórico recente.
+`WatcherState` soma o resumo arquivado à contagem do que ainda está no
+arquivo, então o "Total histórico" nunca volta a zero por causa da rotação.
+
+### Deadlock intermitente ao mostrar a janela (2026-08-24)
+
+`show_window()` chamava `self.window.show()`/`self.window.restore()` (API do
+pywebview) a partir de uma thread de fundo, ~2s após a criação da janela.
+Essas chamadas fazem `Invoke` síncrono na thread da UI do WinForms — se essa
+thread ainda estiver ocupada inicializando o WebView2 quando a chamada
+chega, trava de verdade (mesma classe de bug já resolvida para o ícone,
+trocando `SendMessageW` por `PostMessageW` — ver seção 8, bug do ícone).
+
+Como `_force_show_at()` já mostra, restaura, posiciona e dá foco na janela
+via **Win32 puro** (`ShowWindow` + `SetWindowPos` com `SWP_SHOWWINDOW`), sem
+depender do loop de mensagens do WinForms, bastava usar só ele —
+`show_window()` não chama mais `self.window.show()`/`restore()`. Testado
+com `smoke_test.ps1` (8 aberturas seguidas, 0 travamentos; antes travava de
+forma intermitente).
 
 **Terceira leitura, ainda sem pedido:** integrar de volta com o GitHub —
 comentar automaticamente no PR com a revisão, em vez de só ficar no
