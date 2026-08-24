@@ -1,0 +1,16 @@
+# Artefatos de build do PyInstaller — gerados por build_exe.ps1, nao versionados
+# (o exe final tem ~28MB, e mais simples reconstruir do que versionar binario)
+build/
+dist/
+*.spec
+
+__pycache__/
+*.pyc
+
+# Estado em disco do watcher (%LOCALAPPDATA%\CodeWatcher) nao mora aqui,
+# mas por seguranca:
+*.log
+events.jsonl
+control.json
+seen_commits.json
+seen_prs.json

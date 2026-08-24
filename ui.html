@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Code Watcher</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #272c37;
+    --text: #e6e9ef;
+    --muted: #8b93a5;
+    --accent: #6ea8fe;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-columns: 290px 1fr; height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------- barra lateral ---------- */
+  aside {
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .brand { padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
+  .brand h1 { margin: 0; font-size: 16px; letter-spacing: .3px; }
+  .brand .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+
+  .section-title {
+    padding: 16px 18px 8px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--muted);
+  }
+
+  .master {
+    margin: 0 14px 4px; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none;
+  }
+  .master:hover { border-color: var(--accent); }
+  .master .state { font-size: 12px; font-weight: 600; }
+
+  .proj {
+    margin: 0 14px 6px; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    cursor: pointer; user-select: none;
+  }
+  .proj:hover { border-color: var(--accent); }
+  .proj .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .proj .dot.on  { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+  .proj .dot.off { background: var(--muted); }
+  .proj .name { flex: 1; font-size: 13px; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+  .proj .count {
+    font-size: 11px; color: var(--muted); background: #0d0f13;
+    padding: 2px 7px; border-radius: 10px; flex: none;
+  }
+  .proj.paused .name { color: var(--muted); text-decoration: line-through; }
+  .proj.active { border-color: var(--accent); background: #1a2333; }
+  .proj .name { cursor: pointer; }
+  .proj .dot { cursor: pointer; }
+  .proj.missing .name { color: var(--err); }
+  .proj .rm {
+    flex: none; width: 18px; height: 18px; line-height: 16px; text-align: center;
+    border-radius: 4px; color: var(--muted); font-size: 15px;
+    opacity: 0; transition: opacity .12s;
+  }
+  .proj:hover .rm { opacity: 1; }
+  .proj .rm:hover { background: #3a1f1f; color: var(--err); }
+
+  .add-btn {
+    margin: 2px 14px 4px; padding: 9px 12px; border-radius: 8px;
+    background: transparent; border: 1px dashed var(--border);
+    color: var(--muted); font-size: 12px; text-align: center;
+    cursor: pointer; user-select: none;
+  }
+  .add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- modal de varredura ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; width: 520px; max-width: 90vw;
+    max-height: 78vh; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h3 { margin: 0; padding: 16px 18px; font-size: 14px;
+              border-bottom: 1px solid var(--border); }
+  .modal .hint { padding: 0 18px; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+  #scan-list { overflow-y: auto; padding: 6px 10px 10px; flex: 1; }
+  .scan-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .scan-item:hover { background: var(--panel-2); }
+  .scan-item input { flex: none; accent-color: var(--accent); }
+  .scan-item .name { font-size: 13px; font-weight: 600; flex: none; }
+  .scan-item .path {
+    font-size: 11px; color: var(--muted); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  }
+  .scan-item .tag {
+    font-size: 10px; color: var(--muted); background: #0d0f13;
+    padding: 2px 7px; border-radius: 10px; flex: none;
+  }
+  .scan-item.already { opacity: .55; cursor: default; }
+  .modal-actions {
+    display: flex; justify-content: flex-end; gap: 10px;
+    padding: 14px 18px; border-top: 1px solid var(--border);
+  }
+  .modal-actions button {
+    font: inherit; font-size: 12.5px; padding: 8px 16px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--panel-2);
+    color: var(--text); cursor: pointer;
+  }
+  .modal-actions button:hover { border-color: var(--accent); }
+  .modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: #0f1115; font-weight: 600; }
+  .modal-actions button.primary:hover { opacity: .9; }
+  .modal-actions button:disabled { opacity: .4; cursor: default; }
+
+  #toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 11px 16px; border-radius: 8px; font-size: 13px;
+    max-width: 620px; box-shadow: 0 8px 26px rgba(0,0,0,.55);
+    opacity: 0; pointer-events: none; transition: opacity .18s;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-left-color: var(--err); }
+
+  .stats { padding: 6px 14px 18px; display: grid; gap: 8px; }
+  .stat {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .stat .k { font-size: 11px; color: var(--muted); }
+  .stat .v { font-size: 19px; font-weight: 600; margin-top: 2px; }
+  .stat .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+  /* ---------- feed ---------- */
+  main { display: flex; flex-direction: column; overflow: hidden; }
+  header {
+    padding: 14px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; background: var(--panel);
+  }
+  header h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1;
+              display: flex; align-items: center; gap: 8px; }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 500; color: var(--accent);
+    background: #1a2333; border: 1px solid var(--accent);
+    padding: 3px 6px 3px 10px; border-radius: 20px; cursor: pointer;
+  }
+  .filter-chip:hover { background: #22314a; }
+  .pill {
+    font-size: 11px; padding: 4px 10px; border-radius: 20px;
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.live { color: var(--ok); border-color: #1f4030; }
+  .pill.busy { color: var(--warn); border-color: #4a3a12; }
+  .pill.dead { color: var(--err); border-color: #4a1f1f; }
+
+  #feed { flex: 1; overflow-y: auto; padding: 16px 22px 40px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card.running { border-left-color: var(--warn); }
+  .card.failed  { border-left-color: var(--err); }
+  .retry-btn {
+    background: none; border: 1px solid var(--err); color: var(--err);
+    font-size: 11px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
+    margin-left: 6px;
+  }
+  .retry-btn:hover { background: var(--err); color: #171a21; }
+  .card .head {
+    display: flex; align-items: baseline; gap: 10px;
+    flex-wrap: wrap; margin-bottom: 4px;
+  }
+  .card .file { font-weight: 600; font-size: 13px; }
+  .card .proj-tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+    background: #0d0f13; color: var(--accent);
+    padding: 2px 7px; border-radius: 4px;
+  }
+  .card .source-tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+    background: #1a1030; color: #c4a4ff;
+    padding: 2px 7px; border-radius: 4px;
+  }
+  .card .time { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .card .body { margin-top: 10px; font-size: 13px; color: #cfd4de; }
+  .card .body h1, .card .body h2, .card .body h3 {
+    font-size: 13px; margin: 12px 0 6px; color: var(--text);
+  }
+  .card .body p  { margin: 7px 0; }
+  .card .body ul, .card .body ol { margin: 7px 0; padding-left: 20px; }
+  .card .body li { margin: 3px 0; }
+  .card .body code {
+    background: #0d0f13; padding: 1px 5px; border-radius: 4px;
+    font-family: Consolas, monospace; font-size: 12px; color: #a5d6ff;
+  }
+  .card .body pre {
+    background: #0d0f13; border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; margin: 8px 0;
+  }
+  .card .body pre code { background: none; padding: 0; }
+
+  .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+  .spinner {
+    display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid #4a3a12; border-top-color: var(--warn);
+    animation: spin .8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="brand">
+    <h1>Code Watcher</h1>
+    <div class="sub" id="uptime">iniciando...</div>
+  </div>
+
+  <div class="section-title">Monitoramento</div>
+  <div class="master" id="master" onclick="toggleMaster()">
+    <span>Monitoramento geral</span>
+    <span class="state" id="master-state">—</span>
+  </div>
+
+  <div class="section-title">Pastas monitoradas</div>
+  <div id="projects"></div>
+  <div class="add-btn" onclick="addProject()">+ Adicionar pasta</div>
+  <div class="add-btn" onclick="scanRepos()">🔍 Buscar repositorios</div>
+
+  <div class="section-title">Estatisticas</div>
+  <div class="stats">
+    <div class="stat">
+      <div class="k">Revisoes nesta sessao</div>
+      <div class="v" id="s-session">0</div>
+    </div>
+    <div class="stat">
+      <div class="k">Total historico</div>
+      <div class="v" id="s-total">0</div>
+    </div>
+    <div class="stat">
+      <div class="k">Tempo em revisao</div>
+      <div class="v" id="s-time">0s</div>
+    </div>
+  </div>
+</aside>
+
+<main>
+  <header>
+    <h2 id="feed-title">Feed de revisoes</h2>
+    <span class="pill" id="status">conectando</span>
+  </header>
+  <div id="feed">
+    <div class="empty">Aguardando alteracoes nos projetos monitorados...</div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<div id="scan-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>Repositorios encontrados</h3>
+    <div class="hint">Desmarque os que voce nao quer monitorar.</div>
+    <div id="scan-list"></div>
+    <div class="modal-actions">
+      <button onclick="closeScanModal()">Cancelar</button>
+      <button id="scan-confirm" class="primary" onclick="confirmScanAdd()">Adicionar selecionados</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Renderizador Markdown minimo — cobre o que o Claude Code CLI devolve
+   (titulos, listas, negrito, codigo inline e blocos). Proposital: evita
+   dependencia externa e mantem o app 100% offline. */
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function md(src) {
+  const blocks = [];
+  src = src.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
+    blocks.push("<pre><code>" + esc(code.replace(/\n$/, "")) + "</code></pre>");
+    return " BLOCK" + (blocks.length - 1) + " ";
+  });
+
+  const lines = esc(src).split("\n");
+  let html = "", listType = null;
+
+  const closeList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+
+  for (let raw of lines) {
+    const line = raw.trim();
+    if (!line) { closeList(); continue; }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeList(); html += `<h3>${inline(h[2])}</h3>`; continue; }
+
+    const ol = line.match(/^(\d+)[.)]\s+(.*)$/);
+    if (ol) {
+      if (listType !== "ol") { closeList(); html += "<ol>"; listType = "ol"; }
+      html += `<li>${inline(ol[2])}</li>`; continue;
+    }
+    const ul = line.match(/^[-*+]\s+(.*)$/);
+    if (ul) {
+      if (listType !== "ul") { closeList(); html += "<ul>"; listType = "ul"; }
+      html += `<li>${inline(ul[1])}</li>`; continue;
+    }
+    closeList();
+    html += `<p>${inline(line)}</p>`;
+  }
+  closeList();
+
+  return html.replace(/ BLOCK(\d+) /g, (m, i) => blocks[+i]);
+}
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|\W)\*([^*]+)\*/g, "$1<em>$2</em>");
+}
+
+function fmtDuration(sec) {
+  sec = Math.round(sec);
+  if (sec < 60) return sec + "s";
+  const m = Math.floor(sec / 60), h = Math.floor(m / 60);
+  if (h) return h + "h " + (m % 60) + "m";
+  return m + "m " + (sec % 60) + "s";
+}
+function fmtTime(iso) {
+  return iso ? iso.replace("T", " ").slice(0, 19) : "";
+}
+
+let lastRenderKey = "";
+let activeProjectFilter = null;
+
+function filterByProject(name) {
+  activeProjectFilter = (activeProjectFilter === name) ? null : name;
+  lastRenderKey = "";   // forca redesenho do feed
+  tick();
+}
+
+function clearProjectFilter() {
+  activeProjectFilter = null;
+  lastRenderKey = "";
+  tick();
+}
+
+function render(state) {
+  document.getElementById("uptime").textContent =
+    "rodando ha " + fmtDuration(state.uptime);
+
+  /* titulo do feed + chip de filtro */
+  const titleEl = document.getElementById("feed-title");
+  titleEl.innerHTML = activeProjectFilter
+    ? `Feed de revisoes <span class="filter-chip" onclick="clearProjectFilter()">`
+      + `${esc(activeProjectFilter)} &times;</span>`
+    : "Feed de revisoes";
+
+  /* status geral */
+  const pill = document.getElementById("status");
+  if (!state.watcher_alive) {
+    pill.className = "pill dead"; pill.textContent = "watcher parado";
+  } else if (state.paused) {
+    pill.className = "pill"; pill.textContent = "pausado";
+  } else if (state.reviewing) {
+    pill.className = "pill busy"; pill.textContent = "revisando...";
+  } else {
+    pill.className = "pill live"; pill.textContent = "monitorando";
+  }
+
+  document.getElementById("master-state").textContent =
+    state.paused ? "PAUSADO" : "ATIVO";
+  document.getElementById("master-state").style.color =
+    state.paused ? "var(--muted)" : "var(--ok)";
+
+  /* pastas */
+  const projHtml = state.projects.map(p => {
+    const off = state.paused || p.paused;
+    const broken = !p.exists || !p.is_git;
+    const active = activeProjectFilter === p.name;
+    const tip = broken
+      ? (!p.exists ? "Pasta nao existe mais: " : "Nao e um repositorio git: ") + p.path
+      : p.path + "  (clique no nome para filtrar o feed; clique na bolinha para pausar)";
+    return `<div class="proj ${off ? "paused" : ""} ${broken ? "missing" : ""} ${active ? "active" : ""}"
+                 title="${esc(tip)}">
+              <span class="dot ${off || broken ? "off" : "on"}"
+                    onclick="event.stopPropagation(); toggleProject('${esc(p.name)}')"></span>
+              <span class="name" onclick="filterByProject('${esc(p.name)}')"
+                >${esc(p.name)}${broken ? " (!)" : ""}</span>
+              <span class="count">${p.count}</span>
+              <span class="rm" title="Remover do monitoramento"
+                    onclick="event.stopPropagation(); removeProject('${esc(p.path).replace(/\\/g, "\\\\")}','${esc(p.name)}')"
+                >&times;</span>
+            </div>`;
+  }).join("");
+  const projEl = document.getElementById("projects");
+  if (projEl.dataset.k !== projHtml) { projEl.innerHTML = projHtml; projEl.dataset.k = projHtml; }
+
+  /* estatisticas */
+  document.getElementById("s-session").textContent = state.session_count;
+  document.getElementById("s-total").textContent = state.total_count;
+  document.getElementById("s-time").textContent = fmtDuration(state.review_seconds);
+
+  /* feed */
+  const visibleFeed = activeProjectFilter
+    ? state.feed.filter(c => c.project === activeProjectFilter)
+    : state.feed;
+
+  const key = activeProjectFilter + "|" + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
+  if (key === lastRenderKey) return;
+  lastRenderKey = key;
+
+  const feed = document.getElementById("feed");
+  if (!visibleFeed.length) {
+    feed.innerHTML = activeProjectFilter
+      ? `<div class="empty">Nenhuma revisao de "${esc(activeProjectFilter)}" ainda.</div>`
+      : '<div class="empty">Aguardando alteracoes nos projetos monitorados...</div>';
+    return;
+  }
+  const atTop = feed.scrollTop < 40;
+  feed.innerHTML = visibleFeed.map(c => {
+    let body;
+    if (c.status === "running") {
+      body = '<div class="body"><span class="spinner"></span> Revisando alteracao...</div>';
+    } else if (c.status === "failed") {
+      const shaMatch = c.source === "commit" && /^commit ([0-9a-f]+)/.exec(c.file || "");
+      body = '<div class="body">Revisao nao gerada (erro ou timeout do CLI). '
+           + 'Confira o console do watcher.'
+           + (shaMatch
+               ? ` <button class="retry-btn" onclick="retryCommit('${esc(c.project)}','${shaMatch[1]}')">Revisar novamente</button>`
+               : "")
+           + '</div>';
+    } else {
+      body = '<div class="body">' + md(c.review || "") + "</div>";
+    }
+    return `<div class="card ${c.status}">
+              <div class="head">
+                <span class="proj-tag">${c.project}</span>
+                ${c.source === "commit" ? '<span class="source-tag">commit</span>' : ""}
+                ${c.source === "pr" ? '<span class="source-tag">PR</span>' : ""}
+                <span class="file">${esc(c.file)}</span>
+                <span class="time">${fmtTime(c.ts)}${
+                  c.duration ? " &middot; " + c.duration + "s" : ""}</span>
+              </div>
+              ${body}
+            </div>`;
+  }).join("");
+  if (atTop) feed.scrollTop = 0;
+}
+
+async function tick() {
+  try { render(await window.pywebview.api.get_state()); }
+  catch (e) { /* bridge ainda subindo */ }
+}
+async function toggleMaster()      { await window.pywebview.api.toggle_master(); tick(); }
+async function toggleProject(name) { await window.pywebview.api.toggle_project(name); tick(); }
+
+async function retryCommit(project, sha) {
+  const r = await window.pywebview.api.retry_commit(project, sha);
+  toast(r.msg, !r.ok);
+  lastRenderKey = "";   // forca redesenho (o card novo entra "running")
+  tick();
+}
+
+let toastTimer = null;
+function toast(msg, isError) {
+  if (!msg) return;
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "show" + (isError ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ""; }, 5200);
+}
+
+async function addProject() {
+  const r = await window.pywebview.api.add_project();
+  toast(r.msg, !r.ok);
+  lastRenderKey = "";   // forca redesenho do feed
+  tick();
+}
+
+async function removeProject(path, name) {
+  if (!confirm(`Parar de monitorar "${name}"?\n\nNada e apagado do disco — `
+             + `o review-log.md do projeto continua la.`)) return;
+  const r = await window.pywebview.api.remove_project(path);
+  toast(r.msg, !r.ok);
+  tick();
+}
+
+let scanResults = [];
+
+async function scanRepos() {
+  const r = await window.pywebview.api.scan_for_repos();
+  if (!r.ok) { toast(r.msg, true); return; }
+  scanResults = r.repos;
+  renderScanModal();
+  toast(r.msg, false);
+}
+
+function renderScanModal() {
+  const list = document.getElementById("scan-list");
+  list.innerHTML = scanResults.map((r, i) => `
+    <label class="scan-item ${r.already ? "already" : ""}">
+      <input type="checkbox" data-i="${i}"
+             ${r.already ? "disabled" : "checked"}>
+      <span class="name">${esc(r.name)}</span>
+      <span class="path">${esc(r.path)}</span>
+      ${r.already ? '<span class="tag">ja monitorado</span>' : ""}
+    </label>
+  `).join("");
+  const anySelectable = scanResults.some(r => !r.already);
+  document.getElementById("scan-confirm").disabled = !anySelectable;
+  document.getElementById("scan-modal").classList.remove("hidden");
+}
+
+function closeScanModal() {
+  document.getElementById("scan-modal").classList.add("hidden");
+}
+
+async function confirmScanAdd() {
+  const boxes = document.querySelectorAll("#scan-list input[type=checkbox]:checked");
+  const paths = Array.from(boxes).map(b => scanResults[+b.dataset.i].path);
+  closeScanModal();
+  if (!paths.length) return;
+  const r = await window.pywebview.api.add_projects_bulk(paths);
+  toast(r.msg, !r.ok);
+  lastRenderKey = "";
+  tick();
+}
+
+window.addEventListener("pywebviewready", () => {
+  tick();
+  setInterval(tick, 1000);
+});
+</script>
+</body>
+</html>
