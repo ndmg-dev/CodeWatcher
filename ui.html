@@ -249,6 +249,7 @@
   <div id="projects"></div>
   <div class="add-btn" onclick="addProject()">+ Adicionar pasta</div>
   <div class="add-btn" onclick="scanRepos()">🔍 Buscar repositorios</div>
+  <div class="add-btn" onclick="openSettings()">⚙️ Configuracoes</div>
 
   <div class="section-title">Estatisticas</div>
   <div class="stats">
@@ -287,6 +288,33 @@
     <div class="modal-actions">
       <button onclick="closeScanModal()">Cancelar</button>
       <button id="scan-confirm" class="primary" onclick="confirmScanAdd()">Adicionar selecionados</button>
+    </div>
+  </div>
+</div>
+
+<div id="settings-modal" class="modal-overlay hidden">
+  <div class="modal" style="width: 400px">
+    <h3>Configurações</h3>
+    <div style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+      <label style="font-size: 13px; font-weight: 600;">Provedor de LLM</label>
+      <select id="set-provider" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+        <option value="openai">OpenAI API</option>
+        <option value="claude">Claude CLI</option>
+      </select>
+
+      <label style="font-size: 13px; font-weight: 600;">OpenAI API Key</label>
+      <input type="password" id="set-api-key" placeholder="sk-..." style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+      
+      <label style="font-size: 13px; font-weight: 600;">Modelo OpenAI</label>
+      <select id="set-model" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+        <option value="gpt-4o-mini">gpt-4o-mini (Rapido e barato)</option>
+        <option value="gpt-4o">gpt-4o (Mais inteligencia)</option>
+        <option value="o3-mini">o3-mini (Alta complexidade)</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeSettingsModal()">Cancelar</button>
+      <button class="primary" onclick="saveSettings()">Salvar</button>
     </div>
   </div>
 </div>
@@ -354,6 +382,7 @@ function fmtTime(iso) {
 
 let lastRenderKey = "";
 let activeProjectFilter = null;
+let currentState = null;
 
 function filterByProject(name) {
   activeProjectFilter = (activeProjectFilter === name) ? null : name;
@@ -368,6 +397,7 @@ function clearProjectFilter() {
 }
 
 function render(state) {
+  currentState = state;
   document.getElementById("uptime").textContent =
     "rodando ha " + fmtDuration(state.uptime);
 
@@ -547,6 +577,29 @@ async function confirmScanAdd() {
   const r = await window.pywebview.api.add_projects_bulk(paths);
   toast(r.msg, !r.ok);
   lastRenderKey = "";
+  tick();
+}
+
+function openSettings() {
+  if (currentState) {
+    document.getElementById("set-provider").value = currentState.llm_provider || "claude";
+    document.getElementById("set-api-key").value = currentState.openai_api_key || "";
+    document.getElementById("set-model").value = currentState.openai_model || "gpt-4o";
+  }
+  document.getElementById("settings-modal").classList.remove("hidden");
+}
+
+function closeSettingsModal() {
+  document.getElementById("settings-modal").classList.add("hidden");
+}
+
+async function saveSettings() {
+  const provider = document.getElementById("set-provider").value;
+  const apiKey = document.getElementById("set-api-key").value;
+  const model = document.getElementById("set-model").value;
+  await window.pywebview.api.save_settings(provider, apiKey, model);
+  closeSettingsModal();
+  toast("Configurações salvas.", false);
   tick();
 }
 
