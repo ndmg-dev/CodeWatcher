@@ -300,6 +300,7 @@ class App:
         self.window = None
         self.icon = None
         self._last_icon = None
+        self._win_pos = None   # (x, y) no monitor primario, calculado em run()
 
     # -- thread do watcher ----------------------------------------------------
 
@@ -491,6 +492,17 @@ class App:
             self.window.restore()   # traz de volta se estava minimizada
         except Exception:
             pass
+        # `restore()`/`show()` do WebView2 podem devolver a janela pra ultima
+        # posicao que o Windows lembra pro par (titulo, classe) dela — que em
+        # maquina com 2+ monitores pode ser um monitor secundario, mesmo
+        # tendo passado x/y/screen explicitos na criacao. `move()` forca a
+        # posicao de novo toda vez que a janela e mostrada, sem depender de
+        # nenhuma memoria de posicao do sistema.
+        if self._win_pos is not None:
+            try:
+                self.window.move(*self._win_pos)
+            except Exception:
+                pass
 
     def on_closing(self):
         """X da janela apenas esconde — o app continua na bandeja."""
@@ -565,9 +577,29 @@ class App:
         threading.Thread(target=self.icon_watch_loop, daemon=True).start()
 
         # Janela criada escondida: o app sobe direto para a bandeja.
+        #
+        # screen=... explicito, centralizado no monitor PRIMARIO. Sem isso,
+        # em maquina com 2+ monitores o pywebview escolhe sozinho em qual
+        # monitor abrir (nem sempre o primario) — a janela abre normalmente,
+        # so que fora da tela que o usuario esta olhando, parecendo que "nao
+        # abriu nada". `webview.screens[0]` nao e garantido ser o primario
+        # em toda maquina, entao procuramos explicitamente o que comeca em
+        # (0, 0) — e o unico jeito confiavel de identificar o primario.
+        win_w, win_h = 1180, 760
+        primary_screen = next(
+            (s for s in webview.screens if s.x == 0 and s.y == 0), None
+        )
+        if primary_screen is not None:
+            win_x = max(0, (primary_screen.width - win_w) // 2)
+            win_y = max(0, (primary_screen.height - win_h) // 2)
+            self._win_pos = (win_x, win_y)
+        else:
+            win_x = win_y = None
+
         self.window = webview.create_window(
             "Code Watcher", UI_FILE, js_api=self,
-            width=1180, height=760, min_size=(900, 600), hidden=True,
+            width=win_w, height=win_h, x=win_x, y=win_y, screen=primary_screen,
+            min_size=(900, 600), hidden=True,
         )
         self.window.events.closing += self.on_closing
 
