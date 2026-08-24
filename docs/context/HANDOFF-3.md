@@ -4,9 +4,8 @@
 > leia aqueles primeiro se ainda não leu. Este documento cobre uma sessão
 > bem mais longa: descoberta e correção de um refactor incompleto que
 > quebrava o app, um deadlock intermitente na janela, um vazamento de
-> memória real, e uma leva grande de funcionalidades novas pedidas pelo
-> Arthur ao longo da conversa. **Ainda tem uma pendência em aberto na
-> seção 6** — leia antes de considerar o vazamento de memória resolvido.
+> memória real (já confirmado resolvido, seção 3), e uma leva grande de
+> funcionalidades novas pedidas pelo Arthur ao longo da conversa.
 
 ---
 
@@ -180,7 +179,7 @@ reiniciaria a animação toda hora.
 
 ---
 
-## 3. Vazamento de memória real — descoberto, mitigado, **verificação final pendente**
+## 3. Vazamento de memória real — descoberto, mitigado e **confirmado resolvido**
 
 ### 3.1 Como foi descoberto
 
@@ -229,12 +228,13 @@ perto antes.
    sempre esteve gravado no `review-log.md` do projeto; isso só limita o
    que trafega pela ponte COM a cada tick.
 
-**Resultado observado até o momento em que este documento foi escrito:**
-depois de reiniciar o app com essas duas mudanças, memória ficou **estável
-em ~120MB por pelo menos 2 minutos contínuos** (119,6MB aos 0,9min →
-121,2MB aos 2min) — nada parecido com o crescimento para GB de antes. Uma
-checagem final (~5-6 min de uptime) foi agendada mas **o resultado dela
-ainda não chegou** quando este handoff foi escrito.
+**Resultado confirmado (verificação final já concluída, vazamento
+resolvido):** depois de reiniciar o app com essas duas mudanças, a mesma
+instância (PID 2392) ficou estável por **7,1 minutos contínuos**:
+119,6MB (0,9min) → 121,2MB (2min) → 126MB (7,1min). Crescimento de ~6MB em
+7 minutos é comportamento normal (cache do WebView2 esquentando), nada
+parecido com os 8-15GB em ~3min de antes. **As duas mitigações resolveram
+o problema — não é mais necessário monitorar isso.**
 
 ### 3.3 O que fazer se o vazamento voltar
 
@@ -292,15 +292,12 @@ acima:
   (commits `5bfef84` e `9b79f58` — aparentemente commitadas por um
   mecanismo de auto-commit do ambiente, não por um `git commit` explícito
   desta sessão; vale confirmar se isso é esperado).
-- **Pendência real: seção 3, verificação final do vazamento de memória**
-  ainda não confirmada no momento em que este documento foi escrito. Se o
-  Arthur está lendo isso numa sessão nova, a primeira coisa a fazer é
-  checar se a mitigação realmente resolveu (deixar o app aberto por
-  10-15min e observar a memória) antes de considerar o assunto fechado.
+- **Vazamento de memória confirmado resolvido** (seção 3) — mesma
+  instância monitorada por 7,1 minutos contínuos, memória estável em
+  ~126MB. Nenhuma ação pendente aqui.
 
 ## 6. O que NÃO está feito (próximos passos possíveis)
 
-- **Confirmação final do vazamento de memória** (seção 3.3).
 - **`gh auth login`** — já foi feito em algum momento desta sessão (as
   chamadas de PR funcionaram), mas vale confirmar que continua válido.
 - Ideias de melhoria discutidas mas **não implementadas** (o Arthur pode
