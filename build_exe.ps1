@@ -18,6 +18,7 @@ python -m PyInstaller `
     --name CodeWatcher `
     --icon icon.ico `
     --add-data "ui.html;." `
+    --add-data "icon.ico;." `
     --noconfirm `
     watcher_gui.py
 

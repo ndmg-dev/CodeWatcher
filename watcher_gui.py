@@ -72,6 +72,7 @@ import code_watcher as cw
 # `--add-data` deposita o ui.html — por isso a prioridade a _MEIPASS.
 HERE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 UI_FILE = os.path.join(HERE, "ui.html")
+ICON_FILE = os.path.join(HERE, "icon.ico")
 
 # Quantos cards manter no feed da janela.
 FEED_LIMIT = 60
@@ -487,6 +488,18 @@ class App:
     def show_window(self, *_):
         if not self.window:
             return
+        # Forca o icone ANTES do primeiro show(): a taskbar parece capturar
+        # o HICON no instante em que o botao aparece (janela passa a
+        # Visible=True) e nao redesenha sozinha depois — setar o icone
+        # cedo evita a janela de tempo em que apareceria com o icone do
+        # pythonw.exe.
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Code Watcher")
+            if hwnd:
+                self._force_icon(hwnd)
+        except Exception:
+            pass
         self.window.show()
         try:
             self.window.restore()   # traz de volta se estava minimizada
@@ -526,9 +539,60 @@ class App:
                 SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
             )
             user32.SetForegroundWindow(hwnd)
+            self._force_icon(hwnd)
             cw.log(f"  = janela restaurada e movida para ({x}, {y}) via Win32")
         except Exception as exc:
             cw.log(f"  ! _force_show_at falhou: {exc}")
+
+    def _force_icon(self, hwnd):
+        """Forca o icone.ico na barra de titulo E na taskbar via WM_SETICON.
+
+        `webview.start(icon=...)` deveria bastar (o backend winforms seta
+        Form.Icon a partir de `_state['icon']`), mas na pratica a barra de
+        tarefas continuou mostrando o icone generico do pythonw.exe — o
+        WebView2 parece reafirmar/ignorar o icone do Form em algum momento
+        do proprio carregamento. WM_SETICON direto no hwnd sobrescreve isso
+        de vez, tanto o grande (taskbar/Alt+Tab) quanto o pequeno (titulo).
+
+        PostMessageW, nao SendMessageW: SendMessage entre threads BLOQUEIA
+        ate a thread dona da janela processar a mensagem — se essa thread
+        (a do WebView2/pywebview) estiver ocupada inicializando quando essa
+        chamada chega (do nosso thread `show_soon`), trava os dois lados
+        ("Nao esta respondendo" no Gerenciador de Tarefas, reproduzido e
+        confirmado num teste). PostMessage so enfileira e retorna na hora.
+        """
+        if getattr(self, "_icon_forced", False) or not os.path.isfile(ICON_FILE):
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
+            WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
+
+            hicon_big = user32.LoadImageW(
+                None, ICON_FILE, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+            )
+            hicon_small = user32.LoadImageW(
+                None, ICON_FILE, IMAGE_ICON, 16, 16, LR_LOADFROMFILE
+            )
+            if hicon_big:
+                user32.PostMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+                # GCLP_HICON: alguns caminhos da taskbar/Alt+Tab caem de
+                # volta pro icone da CLASSE da janela, nao so o da instancia
+                # (WM_SETICON). SetClassLongPtrW e sincrono e nao bloqueia
+                # (nao e uma mensagem enfileirada), sem risco do deadlock do
+                # SendMessage.
+                set_class_long = getattr(user32, "SetClassLongPtrW", user32.SetClassLongW)
+                GCLP_HICON = -14
+                set_class_long(hwnd, GCLP_HICON, hicon_big)
+            if hicon_small:
+                user32.PostMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+                GCLP_HICONSM = -34
+                set_class_long = getattr(user32, "SetClassLongPtrW", user32.SetClassLongW)
+                set_class_long(hwnd, GCLP_HICONSM, hicon_small)
+            self._icon_forced = True
+        except Exception as exc:
+            cw.log(f"  ! _force_icon falhou: {exc}")
 
     def on_closing(self):
         """X da janela apenas esconde — o app continua na bandeja."""
@@ -641,7 +705,12 @@ class App:
             threading.Thread(target=show_soon, daemon=True).start()
 
         try:
-            webview.start()          # bloqueia na thread principal
+            # icon=... : sem isso, a janela pega o icone do pythonw.exe por
+            # padrao (ExtractIconW em sys.executable, no backend winforms) —
+            # o "cobrinha" generico do Python na barra de tarefas em vez do
+            # nosso. A docstring do pywebview diz "GTK/QT only", mas o
+            # backend Windows (winforms.py) honra esse parametro tambem.
+            webview.start(icon=ICON_FILE if os.path.isfile(ICON_FILE) else None)
         finally:
             self.stop_flag.set()
             self.stop_watcher()
