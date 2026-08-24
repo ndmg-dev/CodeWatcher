@@ -2,7 +2,8 @@
 
 > Revisão automática de código enquanto você trabalha em outras tarefas.
 > Última atualização: **2026-08-24** (refactor em pacote `watcher/`, correção
-> de deadlock na janela, rate limit de revisões, rotação de `events.jsonl`)
+> de deadlock na janela, rate limit de revisões, rotação de `events.jsonl`,
+> custo estimado da OpenAI, soneca no monitoramento, filtro de críticas)
 
 ---
 
@@ -408,7 +409,8 @@ Clicar no **nome** da pasta pausa/retoma só ela.
 | `GH_CMD` | `"gh"` | Comando do GitHub CLI, usado só para ler PRs |
 | `PR_POLL_SECONDS` | `300` | Intervalo entre checagens de PR por repositório |
 | `GH_TIMEOUT` | `30` | Timeout de cada comando `gh` |
-| `MAX_REVIEWS_PER_HOUR` | `30` | Teto de chamadas ao LLM por hora, somando todos os projetos (ver seção 4) |
+| `DEFAULT_MAX_REVIEWS_PER_HOUR` | `30` | Valor de fábrica do teto de chamadas/hora — editável pelo painel (Configurações), gravado em `control.json` |
+| `DEFAULT_NOTIFY_SEVERITY` | `"alta"` | Valor de fábrica do gatilho de notificação — editável pelo painel |
 | `EVENTS_MAX_BYTES` | `5 MB` | Tamanho do `events.jsonl` que dispara rotação (ver seção 4) |
 | `EVENTS_KEEP_LINES` | `2000` | Linhas recentes mantidas em `events.jsonl` após rotação |
 
@@ -676,10 +678,16 @@ cenário simulado.
   acontecerem no mesmo PR dentro do intervalo de 5 minutos, só o mais
   recente é revisado — mesma simplificação já aceita para commits e
   arquivos.
-- **Rate limit (30 revisões/hora) é em memória, não persiste entre
-  reinícios do watcher.** Um commit ou PR pulado por rate limit não é
-  marcado como "visto" — só é revisado de novo se o ref mudar de novo, ou
-  via "Revisar novamente" no painel.
+- **A contagem da janela de rate limit é em memória**, não persiste entre
+  reinícios do watcher (o teto em si, esse sim, fica salvo em
+  `control.json`). Um commit ou PR pulado por rate limit não é marcado
+  como "visto" — só é revisado de novo se o ref mudar de novo, ou via
+  "Revisar novamente" no painel.
+- **Custo estimado da OpenAI é aproximado**, calculado com uma tabela de
+  preços por modelo mantida à mão em `watcher/llm.py`
+  (`OPENAI_PRICING_PER_1M`). Se a OpenAI mudar o preço de um modelo, a
+  estimativa do painel fica desatualizada até alguém atualizar a tabela —
+  nunca é a fatura real, só uma referência.
 
 ---
 
@@ -789,6 +797,43 @@ Campo de texto no cabeçalho do feed (`#search-box` em `ui.html`), filtrando
 client-side por projeto, arquivo ou conteúdo da revisão — o feed já vive
 inteiro em memória no JS, então não precisou de nenhuma mudança no backend.
 Combina com o filtro por projeto já existente (clicar no nome da pasta).
+
+### Custo estimado da OpenAI, soneca e configuração pelo painel (2026-08-24)
+
+Quatro melhorias pedidas depois de trocar o provedor padrão para a API da
+OpenAI (paga por token, ao contrário da assinatura do Claude CLI):
+
+- **Custo estimado por chamada:** `call_openai()` em `watcher/llm.py` agora
+  retorna também o `usage` (prompt/completion tokens) devolvido pela API.
+  `estimate_cost_usd()` converte isso em USD usando uma tabela de preços
+  aproximada por modelo (`OPENAI_PRICING_PER_1M`) — só uma estimativa
+  exibida no painel, nunca a fatura real. Claude CLI sempre retorna custo
+  `0.0` (roda sob assinatura, sem contagem de tokens por chamada aqui).
+  `call_llm()` mudou de assinatura: retorna `(texto, custo_usd)` em vez de
+  só o texto.
+- **Rastreamento de custo:** o custo de cada revisão vai no evento
+  `review_done` (`cost_usd`) e é gravado no `review-log.md`
+  (`**Custo estimado:** $0.0032`). `WatcherState` soma um total histórico
+  (com baseline em `events_summary.json`, sobrevive à rotação) e um total
+  do dia (mesmo dicionário `daily_counts` do resumo diário). O painel
+  mostra os dois, com o aviso "(OpenAI, estimado)".
+- **Soneca (pausa temporária):** `snooze_pause(minutes)` em
+  `watcher/config.py` grava `paused=True` + `paused_until` (ISO). A
+  retomada automática acontece dentro do próprio `read_control()` — se
+  `paused_until` já passou, ele desfaz a pausa e regrava o arquivo antes
+  de devolver o estado, sem precisar de um timer de fundo. **Importante:**
+  `write_control()` (usado pelo pause/resume manual e por
+  `toggle_project`/config) sempre limpa `paused_until` quando `paused` é
+  passado explicitamente — senão um pause manual feito depois de uma
+  soneca antiga herdaria um horário de retomada já vencido e despausaria
+  sozinho na hora errada. Só `snooze_pause()` deve gravar `paused_until`
+  no futuro.
+- **Rate limit e limiar de notificação configuráveis pelo painel:**
+  `MAX_REVIEWS_PER_HOUR` e o gatilho de severidade da notificação (ver
+  seção anterior) eram constantes fixas; agora são campos em
+  `control.json` (`max_reviews_per_hour`, `notify_severity`), editáveis
+  no modal de Configurações, com os mesmos valores de fábrica de antes
+  (30/hora, só severidade alta) quando nada foi salvo ainda.
 
 ### Deadlock intermitente ao mostrar a janela (2026-08-24)
 

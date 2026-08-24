@@ -42,10 +42,19 @@
     margin: 0 14px 4px; padding: 10px 12px; border-radius: 8px;
     background: var(--panel-2); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
-    cursor: pointer; user-select: none;
+    user-select: none;
   }
   .master:hover { border-color: var(--accent); }
+  .master .label { cursor: pointer; flex: 1; }
   .master .state { font-size: 12px; font-weight: 600; }
+
+  .snooze-select {
+    margin: 0 14px 10px; width: calc(100% - 28px);
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .snooze-select:hover { border-color: var(--accent); }
 
   .proj {
     margin: 0 14px 6px; padding: 10px 12px; border-radius: 8px;
@@ -167,6 +176,7 @@
   .stat .k { font-size: 11px; color: var(--muted); }
   .stat .v { font-size: 19px; font-weight: 600; margin-top: 2px; }
   .stat .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  #s-today-cost, #s-total-cost { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
 
   /* ---------- feed ---------- */
   main { display: flex; flex-direction: column; overflow: hidden; }
@@ -183,6 +193,10 @@
     padding: 3px 6px 3px 10px; border-radius: 20px; cursor: pointer;
   }
   .filter-chip:hover { background: #22314a; }
+  .filter-chip.inactive {
+    color: var(--muted); background: transparent; border-color: var(--border);
+  }
+  .filter-chip.inactive:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
   .pill {
     font-size: 11px; padding: 4px 10px; border-radius: 20px;
     border: 1px solid var(--border); color: var(--muted);
@@ -273,10 +287,17 @@
   </div>
 
   <div class="section-title">Monitoramento</div>
-  <div class="master" id="master" onclick="toggleMaster()">
-    <span>Monitoramento geral</span>
+  <div class="master" id="master">
+    <span class="label" onclick="toggleMaster()">Monitoramento geral</span>
     <span class="state" id="master-state">—</span>
   </div>
+  <select class="snooze-select" id="snooze-select" onchange="onSnoozeChange(this.value)">
+    <option value="">Soneca (pausar por um tempo)...</option>
+    <option value="30">Pausar por 30 minutos</option>
+    <option value="60">Pausar por 1 hora</option>
+    <option value="120">Pausar por 2 horas</option>
+    <option value="240">Pausar por 4 horas</option>
+  </select>
 
   <div class="section-title">Pastas monitoradas</div>
   <div id="projects"></div>
@@ -311,6 +332,7 @@
       <div class="body">
         <div class="k">Total histórico</div>
         <div class="v" id="s-total">0</div>
+        <small id="s-total-cost"></small>
       </div>
     </div>
     <div class="stat">
@@ -337,7 +359,8 @@
       </div>
       <div class="body">
         <div class="k">Resumo de hoje</div>
-        <div class="v" id="s-today">0 (0 críticos)</div>
+        <div class="v"><span id="s-today">0 (0 críticos)</span></div>
+        <small id="s-today-cost"></small>
       </div>
     </div>
   </div>
@@ -347,6 +370,10 @@
   <header>
     <h2 id="feed-title">Feed de revisões</h2>
     <input id="search-box" type="text" placeholder="Buscar no feed..." oninput="onSearchInput(this.value)">
+    <span class="filter-chip inactive" id="critical-toggle" onclick="toggleCriticalFilter()" title="Mostrar so revisoes com severidade alta">
+      <svg class="icon" viewBox="0 0 24 24" style="width:11px;height:11px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      So criticas
+    </span>
     <span class="pill" id="status">conectando</span>
   </header>
   <div id="feed">
@@ -386,6 +413,16 @@
         <option value="gpt-4o-mini">gpt-4o-mini (Rápido e barato)</option>
         <option value="gpt-4o">gpt-4o (Mais inteligência)</option>
         <option value="o3-mini">o3-mini (Alta complexidade)</option>
+      </select>
+
+      <label style="font-size: 13px; font-weight: 600;">Limite de revisões por hora</label>
+      <input type="number" id="set-max-reviews" min="1" max="500" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+
+      <label style="font-size: 13px; font-weight: 600;">Notificar na bandeja quando</label>
+      <select id="set-notify-severity" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+        <option value="alta">Só achados críticos (severidade alta)</option>
+        <option value="media">Críticos e médios</option>
+        <option value="nunca">Nunca notificar</option>
       </select>
     </div>
     <div class="modal-actions">
@@ -455,6 +492,10 @@ function fmtDuration(sec) {
 function fmtTime(iso) {
   return iso ? iso.replace("T", " ").slice(0, 19) : "";
 }
+function fmtUsd(v) {
+  if (!v) return "$0";
+  return "$" + (v < 0.01 ? v.toFixed(4) : v.toFixed(2));
+}
 
 let lastRenderKey = "";
 let activeProjectFilter = null;
@@ -503,8 +544,13 @@ function render(state) {
     pill.className = "pill live"; pill.textContent = "monitorando";
   }
 
-  document.getElementById("master-state").textContent =
-    state.paused ? "PAUSADO" : "ATIVO";
+  let masterLabel = "ATIVO";
+  if (state.paused && state.paused_until) {
+    masterLabel = "SONECA até " + fmtTime(state.paused_until).slice(-8, -3);
+  } else if (state.paused) {
+    masterLabel = "PAUSADO";
+  }
+  document.getElementById("master-state").textContent = masterLabel;
   document.getElementById("master-state").style.color =
     state.paused ? "var(--muted)" : "var(--ok)";
 
@@ -534,6 +580,9 @@ function render(state) {
   /* estatísticas */
   document.getElementById("s-session").textContent = state.session_count;
   document.getElementById("s-total").textContent = state.total_count;
+  document.getElementById("s-total-cost").textContent = state.total_cost_usd
+    ? "≈ " + fmtUsd(state.total_cost_usd) + " total (OpenAI, estimado)"
+    : "";
   document.getElementById("s-time").textContent = fmtDuration(state.review_seconds);
   const rateEl = document.getElementById("s-rate");
   rateEl.textContent = state.reviews_this_hour + "/" + state.reviews_hour_limit;
@@ -541,11 +590,18 @@ function render(state) {
   const todayEl = document.getElementById("s-today");
   todayEl.textContent = state.today_total + " (" + state.today_critical + " críticos)";
   todayEl.style.color = state.today_critical > 0 ? "var(--err)" : "";
+  const todayCostEl = document.getElementById("s-today-cost");
+  todayCostEl.textContent = state.today_cost_usd
+    ? "≈ " + fmtUsd(state.today_cost_usd) + " hoje (OpenAI, estimado)"
+    : "";
 
   /* feed */
   let visibleFeed = activeProjectFilter
     ? state.feed.filter(c => c.project === activeProjectFilter)
     : state.feed;
+  if (onlyCritical) {
+    visibleFeed = visibleFeed.filter(c => c.severity === "alta");
+  }
   if (searchQuery) {
     visibleFeed = visibleFeed.filter(c =>
       (c.file || "").toLowerCase().includes(searchQuery)
@@ -554,7 +610,7 @@ function render(state) {
     );
   }
 
-  const key = activeProjectFilter + "|" + searchQuery + "|"
+  const key = activeProjectFilter + "|" + searchQuery + "|" + onlyCritical + "|"
     + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
   if (key === lastRenderKey) return;
   lastRenderKey = key;
@@ -563,6 +619,8 @@ function render(state) {
   if (!visibleFeed.length) {
     feed.innerHTML = searchQuery
       ? `<div class="empty">Nenhuma revisão contendo "${esc(searchQuery)}".</div>`
+      : onlyCritical
+      ? '<div class="empty">Nenhum achado crítico até agora.</div>'
       : activeProjectFilter
       ? `<div class="empty">Nenhuma revisão de "${esc(activeProjectFilter)}" ainda.</div>`
       : '<div class="empty">Aguardando alterações nos projetos monitorados...</div>';
@@ -689,6 +747,8 @@ function openSettings() {
     document.getElementById("set-provider").value = currentState.llm_provider || "claude";
     document.getElementById("set-api-key").value = currentState.openai_api_key || "";
     document.getElementById("set-model").value = currentState.openai_model || "gpt-4o";
+    document.getElementById("set-max-reviews").value = currentState.max_reviews_per_hour || 30;
+    document.getElementById("set-notify-severity").value = currentState.notify_severity || "alta";
   }
   document.getElementById("settings-modal").classList.remove("hidden");
 }
@@ -701,10 +761,28 @@ async function saveSettings() {
   const provider = document.getElementById("set-provider").value;
   const apiKey = document.getElementById("set-api-key").value;
   const model = document.getElementById("set-model").value;
-  await window.pywebview.api.save_settings(provider, apiKey, model);
+  const maxReviews = document.getElementById("set-max-reviews").value;
+  const notifySeverity = document.getElementById("set-notify-severity").value;
+  await window.pywebview.api.save_settings(provider, apiKey, model, maxReviews, notifySeverity);
   closeSettingsModal();
   toast("Configurações salvas.", false);
   tick();
+}
+
+async function onSnoozeChange(minutes) {
+  if (!minutes) return;
+  const r = await window.pywebview.api.snooze(minutes);
+  toast(r.msg, !r.ok);
+  document.getElementById("snooze-select").value = "";
+  tick();
+}
+
+let onlyCritical = false;
+function toggleCriticalFilter() {
+  onlyCritical = !onlyCritical;
+  document.getElementById("critical-toggle").classList.toggle("inactive", !onlyCritical);
+  lastRenderKey = "";
+  if (currentState) render(currentState);
 }
 
 window.addEventListener("pywebviewready", () => {

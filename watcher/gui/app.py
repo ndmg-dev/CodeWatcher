@@ -10,6 +10,7 @@ import webview
 
 from ..config import (
     STATE_DIR, read_control, write_control, load_watched_dirs, save_watched_dirs,
+    snooze_pause,
 )
 from ..git import is_git_repo, discover_git_repos, project_name
 from ..logger import log, emit_event
@@ -82,8 +83,26 @@ class App:
             self.tray.refresh()
         return True
 
-    def save_settings(self, provider, api_key, model):
-        write_control(llm_provider=provider, openai_api_key=api_key, openai_model=model)
+    def snooze(self, minutes):
+        """Pausa o monitoramento geral por N minutos, com retomada automatica
+        (soneca) — diferente de toggle_master, que pausa indefinidamente."""
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            return {"ok": False, "msg": "Duracao invalida."}
+        if minutes <= 0:
+            return {"ok": False, "msg": "Duracao invalida."}
+        control = snooze_pause(minutes)
+        if self.tray:
+            self.tray.refresh()
+        return {"ok": True, "msg": f"Monitoramento pausado por {minutes} min.",
+                "paused_until": control["paused_until"]}
+
+    def save_settings(self, provider, api_key, model, max_reviews_per_hour, notify_severity):
+        write_control(
+            llm_provider=provider, openai_api_key=api_key, openai_model=model,
+            max_reviews_per_hour=max_reviews_per_hour, notify_severity=notify_severity,
+        )
         return True
 
     def add_project(self):
@@ -292,10 +311,18 @@ class App:
 
     def _notify_if_critical(self, event):
         """Chamado para cada evento novo (nao historico) — mostra um balao da
-        bandeja quando uma revisao termina com severidade alta, ja que o
-        painel normalmente fica minimizado na bandeja e um bug real pode
-        passar despercebido."""
-        if event.get("type") != "review_done" or event.get("severity") != "alta":
+        bandeja quando uma revisao atinge o limiar configurado
+        (Configuracoes > Notificar em), ja que o painel normalmente fica
+        minimizado na bandeja e um bug real pode passar despercebido."""
+        if event.get("type") != "review_done":
+            return
+        severity = event.get("severity")
+        threshold = read_control().get("notify_severity", "alta")
+        should_notify = (
+            (threshold == "alta" and severity == "alta")
+            or (threshold == "media" and severity in ("alta", "media"))
+        )
+        if not should_notify:
             return
         if not self.tray:
             return

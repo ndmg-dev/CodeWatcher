@@ -62,6 +62,7 @@ def _rotate_events_if_needed():
             summary["total_count"] = summary.get("total_count", 0) + 1
             project = event.get("project", "?")
             summary["per_project"][project] = summary["per_project"].get(project, 0) + 1
+            summary["total_cost_usd"] = summary.get("total_cost_usd", 0.0) + float(event.get("cost_usd") or 0)
     save_events_summary(summary)
 
     tmp = EVENTS_FILE + ".tmp"

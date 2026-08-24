@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import datetime
 
-from .config import MAX_DIFF_CHARS, MAX_REVIEWS_PER_HOUR, REVIEW_LOG_NAME, read_control
+from .config import MAX_DIFF_CHARS, REVIEW_LOG_NAME, read_control
 from .git import (
     project_name, get_diff, get_commit_diff, get_pr_diff,
     read_ref_sha, load_seen_commits, mark_commit_seen,
@@ -22,18 +22,21 @@ _rate_lock = threading.Lock()
 _call_times = collections.deque()
 
 _SEVERITY_RE = re.compile(r"^\s*severidade\s*:\s*(alta|media|média|baixa)\s*$", re.IGNORECASE)
+_SEVERITY_DISPLAY = {"alta": "alta", "media": "média", "baixa": "baixa"}
 
 
 def _allow_review():
-    """Sliding window de MAX_REVIEWS_PER_HOUR chamadas por hora, somando todos
-    os projetos. Reserva a vaga (registra o timestamp) na mesma chamada que
-    aprova, para nao deixar brecha de corrida entre checar e consumir.
-    Em memoria, nao persiste entre reinicios do watcher."""
+    """Sliding window de N chamadas por hora (configuravel pelo painel,
+    'max_reviews_per_hour' em control.json), somando todos os projetos.
+    Reserva a vaga (registra o timestamp) na mesma chamada que aprova, para
+    nao deixar brecha de corrida entre checar e consumir. Em memoria, nao
+    persiste entre reinicios do watcher (o teto em si, esse sim, persiste)."""
+    limit = read_control()["max_reviews_per_hour"]
     now = time.time()
     with _rate_lock:
         while _call_times and now - _call_times[0] > _RATE_WINDOW_SECONDS:
             _call_times.popleft()
-        if len(_call_times) >= MAX_REVIEWS_PER_HOUR:
+        if len(_call_times) >= limit:
             return False
         _call_times.append(now)
         return True
@@ -41,11 +44,12 @@ def _allow_review():
 
 def rate_limit_status():
     """(usadas, limite) na janela atual de 1h — para o painel exibir."""
+    limit = read_control()["max_reviews_per_hour"]
     now = time.time()
     with _rate_lock:
         while _call_times and now - _call_times[0] > _RATE_WINDOW_SECONDS:
             _call_times.popleft()
-        return len(_call_times), MAX_REVIEWS_PER_HOUR
+        return len(_call_times), limit
 
 
 def _extract_severity(review_text):
@@ -68,20 +72,22 @@ def _extract_severity(review_text):
 
 
 def review_with_llm(repo_root, prompt_template, diff, **fields):
-    """Formata uma solicitacao de revisao e a envia ao provedor configurado."""
+    """Formata uma solicitacao de revisao e a envia ao provedor configurado.
+    Retorna (texto, custo_usd_estimado) — custo e 0.0 fora da OpenAI."""
     if len(diff) > MAX_DIFF_CHARS:
         diff = diff[:MAX_DIFF_CHARS] + "\n... (diff truncado)"
     return call_llm(repo_root, prompt_template.format(diff=diff, **fields))
 
 
-def append_to_review_log(repo_root, rel_path, review, severity=None):
+def append_to_review_log(repo_root, rel_path, review, severity=None, cost_usd=0.0):
     """Anexa a revisao ao review-log.md na raiz do projeto."""
     log_path = os.path.join(repo_root, REVIEW_LOG_NAME)
-    severity_display = {"alta": "alta", "media": "média", "baixa": "baixa"}.get(severity, severity)
-    severity_line = f"**Severidade:** {severity_display}\n\n" if severity else ""
+    severity_line = (f"**Severidade:** {_SEVERITY_DISPLAY.get(severity, severity)}\n\n"
+                      if severity else "")
+    cost_line = f"**Custo estimado:** ${cost_usd:.4f}\n\n" if cost_usd else ""
     entry = (
         f"\n## {datetime.now():%Y-%m-%d %H:%M:%S} — `{rel_path}`\n\n"
-        f"{severity_line}{review}\n"
+        f"{severity_line}{cost_line}{review}\n"
     )
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(entry)
@@ -110,7 +116,7 @@ def process_file(repo_root, file_path):
         return
 
     if not _allow_review():
-        log(f"  - {rel_path}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        log(f"  - {rel_path}: limite de revisoes/hora atingido, pulando.")
         emit_event("review_failed", project=project, file=rel_path, reason="rate_limit")
         return
 
@@ -119,7 +125,7 @@ def process_file(repo_root, file_path):
                diff_chars=len(diff))
 
     started = time.time()
-    raw_result = review_with_llm(
+    raw_result, cost_usd = review_with_llm(
         repo_root, PROMPT_TEMPLATE, diff, path=rel_path,
     )
     elapsed = round(time.time() - started, 1)
@@ -132,10 +138,11 @@ def process_file(repo_root, file_path):
 
     severity, result = _extract_severity(raw_result)
     mark_diff_hash(repo_key, "file", rel_path, fingerprint)
-    log_path = append_to_review_log(repo_root, rel_path, result, severity)
+    log_path = append_to_review_log(repo_root, rel_path, result, severity, cost_usd)
     log(f"  = revisao salva em {log_path} (severidade: {severity})")
     emit_event("review_done", project=project, file=rel_path,
-               review=result, severity=severity, duration=elapsed, log_path=log_path)
+               review=result, severity=severity, duration=elapsed,
+               cost_usd=cost_usd, log_path=log_path)
 
 
 def process_ref_update(repo_root, branch):
@@ -174,7 +181,7 @@ def process_ref_update(repo_root, branch):
         return
 
     if not _allow_review():
-        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        log(f"  - {label}: limite de revisoes/hora atingido, pulando.")
         emit_event("review_failed", project=project, file=label, source="commit",
                    reason="rate_limit")
         return
@@ -184,7 +191,7 @@ def process_ref_update(repo_root, branch):
                diff_chars=len(diff))
 
     started = time.time()
-    raw_result = review_with_llm(
+    raw_result, cost_usd = review_with_llm(
         repo_root, PROMPT_TEMPLATE_COMMIT, diff,
         sha=sha[:7], subject=subject,
     )
@@ -199,10 +206,11 @@ def process_ref_update(repo_root, branch):
     severity, result = _extract_severity(raw_result)
     mark_commit_seen(repo_key, branch, sha)
     mark_diff_hash(repo_key, "commit", branch, fingerprint)
-    log_path = append_to_review_log(repo_root, label, result, severity)
+    log_path = append_to_review_log(repo_root, label, result, severity, cost_usd)
     log(f"  = revisao salva em {log_path} (severidade: {severity})")
     emit_event("review_done", project=project, file=label, source="commit",
-               review=result, severity=severity, duration=elapsed, log_path=log_path)
+               review=result, severity=severity, duration=elapsed,
+               cost_usd=cost_usd, log_path=log_path)
 
 
 def process_pr(repo_root, pr):
@@ -238,7 +246,7 @@ def process_pr(repo_root, pr):
         return
 
     if not _allow_review():
-        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando.")
+        log(f"  - {label}: limite de revisoes/hora atingido, pulando.")
         emit_event("review_failed", project=project, file=label, source="pr",
                    reason="rate_limit")
         return
@@ -248,7 +256,7 @@ def process_pr(repo_root, pr):
                diff_chars=len(diff))
 
     started = time.time()
-    raw_result = review_with_llm(
+    raw_result, cost_usd = review_with_llm(
         repo_root, PROMPT_TEMPLATE_PR, diff, number=number, title=title,
     )
     elapsed = round(time.time() - started, 1)
@@ -262,10 +270,11 @@ def process_pr(repo_root, pr):
     severity, result = _extract_severity(raw_result)
     mark_pr_seen(repo_key, number, head_sha)
     mark_diff_hash(repo_key, "pr", number, fingerprint)
-    log_path = append_to_review_log(repo_root, label, result, severity)
+    log_path = append_to_review_log(repo_root, label, result, severity, cost_usd)
     log(f"  = revisao salva em {log_path} (severidade: {severity})")
     emit_event("review_done", project=project, file=label, source="pr",
-               review=result, severity=severity, duration=elapsed, log_path=log_path)
+               review=result, severity=severity, duration=elapsed,
+               cost_usd=cost_usd, log_path=log_path)
 
 
 def retry_commit_review(repo_root, sha):
@@ -283,7 +292,7 @@ def retry_commit_review(repo_root, sha):
         return False
 
     if not _allow_review():
-        log(f"  - {label}: limite de {MAX_REVIEWS_PER_HOUR} revisoes/hora atingido, pulando (retry manual).")
+        log(f"  - {label}: limite de revisoes/hora atingido, pulando (retry manual).")
         emit_event("review_failed", project=project, file=label, source="commit",
                    reason="rate_limit")
         return False
@@ -293,7 +302,7 @@ def retry_commit_review(repo_root, sha):
                diff_chars=len(diff))
 
     started = time.time()
-    raw_result = review_with_llm(
+    raw_result, cost_usd = review_with_llm(
         repo_root, PROMPT_TEMPLATE_COMMIT, diff,
         sha=sha[:7], subject=subject,
     )
@@ -306,8 +315,9 @@ def retry_commit_review(repo_root, sha):
         return False
 
     severity, result = _extract_severity(raw_result)
-    log_path = append_to_review_log(repo_root, label, result, severity)
+    log_path = append_to_review_log(repo_root, label, result, severity, cost_usd)
     log(f"  = revisao salva em {log_path} (retry manual, severidade: {severity})")
     emit_event("review_done", project=project, file=label, source="commit",
-               review=result, severity=severity, duration=elapsed, log_path=log_path)
+               review=result, severity=severity, duration=elapsed,
+               cost_usd=cost_usd, log_path=log_path)
     return True

@@ -79,14 +79,44 @@ Nao reescreva o arquivo inteiro nem repita o diff."""
 
 
 # ---------------------------------------------------------------------------
+# Custo estimado (so se aplica a API paga por token da OpenAI — o Claude CLI
+# roda sob a assinatura existente, sem custo marginal por chamada aqui).
+# Precos aproximados (USD por 1M tokens), lista publica da OpenAI — podem
+# ficar desatualizados se a OpenAI mudar preco; e so uma estimativa exibida
+# no painel, nunca a fatura real.
+# ---------------------------------------------------------------------------
+
+OPENAI_PRICING_PER_1M = {
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "o3-mini": {"input": 1.10, "output": 4.40},
+}
+
+
+def estimate_cost_usd(model, usage):
+    """Custo estimado (USD) de uma chamada, a partir do 'usage' devolvido
+    pela API da OpenAI. 0.0 se o modelo for desconhecido ou usage ausente
+    (ex: Claude CLI, que nao devolve contagem de tokens por chamada)."""
+    if not usage:
+        return 0.0
+    pricing = OPENAI_PRICING_PER_1M.get(model)
+    if not pricing:
+        return 0.0
+    tokens_in = usage.get("prompt_tokens", 0)
+    tokens_out = usage.get("completion_tokens", 0)
+    return (tokens_in * pricing["input"] + tokens_out * pricing["output"]) / 1_000_000
+
+
+# ---------------------------------------------------------------------------
 # Provedores
 # ---------------------------------------------------------------------------
 
 def call_openai(prompt, api_key, model):
-    """Chama a API da OpenAI para gerar a revisao do codigo."""
+    """Chama a API da OpenAI. Retorna (texto, usage) — usage e o dict 'usage'
+    cru da resposta (prompt_tokens/completion_tokens), ou None em erro."""
     if not api_key:
         log("  ! Chave OPENAI_API_KEY nao configurada.")
-        return None
+        return None, None
 
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -117,14 +147,16 @@ def call_openai(prompt, api_key, model):
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+            text = data["choices"][0]["message"]["content"].strip()
+            return text, data.get("usage")
     except Exception as exc:
         log(f"  ! Erro na API da OpenAI: {exc}")
-        return None
+        return None, None
 
 
 def call_claude(repo_root, prompt):
-    """Chama o Claude Code CLI com um prompt pronto. Retorna o texto ou None.
+    """Chama o Claude Code CLI com um prompt pronto. Retorna (texto, None) —
+    None no lugar de usage porque o CLI nao devolve contagem de tokens.
 
     O prompt vai por stdin, nao como argumento `-p "<prompt>"`. Um commit ou
     PR grande facilmente passa dos ~8191 caracteres que o wrapper .cmd do
@@ -147,25 +179,32 @@ def call_claude(repo_root, prompt):
     except FileNotFoundError:
         log(f"  ! comando '{CLAUDE_CMD}' nao encontrado no PATH. "
             f"Ajuste a constante CLAUDE_CMD no topo do script.")
-        return None
+        return None, None
     except subprocess.TimeoutExpired:
         log(f"  ! revisao excedeu {CLAUDE_TIMEOUT}s e foi abortada.")
-        return None
+        return None, None
     except OSError as exc:
         log(f"  ! erro ao executar o CLI: {exc}")
-        return None
+        return None, None
 
     if result.returncode != 0:
         log(f"  ! CLI retornou {result.returncode}: {result.stderr.strip()[:300]}")
-        return None
+        return None, None
 
-    return result.stdout.strip() or None
+    return result.stdout.strip() or None, None
 
 
 def call_llm(repo_root, prompt):
-    """Encaminha o prompt para o provedor configurado."""
+    """Encaminha o prompt para o provedor configurado.
+
+    Retorna (texto, custo_usd_estimado). custo e sempre 0.0 para o Claude
+    CLI (assinatura, sem contagem de tokens por chamada aqui).
+    """
     ctrl = read_control()
     if ctrl.get("llm_provider") == "openai":
-        return call_openai(prompt, ctrl.get("openai_api_key", ""), ctrl.get("openai_model", "gpt-4o"))
+        model = ctrl.get("openai_model", "gpt-4o")
+        text, usage = call_openai(prompt, ctrl.get("openai_api_key", ""), model)
+        return text, estimate_cost_usd(model, usage)
     else:
-        return call_claude(repo_root, prompt)
+        text, _usage = call_claude(repo_root, prompt)
+        return text, 0.0

@@ -29,13 +29,14 @@ class WatcherState:
         # "Total historico" do painel voltaria a zero a cada rotacao.
         self.total_count = summary["total_count"]
         self.per_project = dict(summary["per_project"])
+        self.total_cost_usd = summary["total_cost_usd"]
         self.session_count = 0
         self.review_seconds = 0.0
         self.reviewing = False
         self._seq = 0
-        # Resumo diario: {"YYYY-MM-DD": {"total": n, "critical": n}}. Chaveado
-        # pela data do proprio evento (nao "hoje" fixo no boot), entao a
-        # virada de meia-noite se resolve sozinha em snapshot() sem precisar
+        # Resumo diario: {"YYYY-MM-DD": {"total": n, "critical": n, "cost_usd": x}}.
+        # Chaveado pela data do proprio evento (nao "hoje" fixo no boot), entao
+        # a virada de meia-noite se resolve sozinha em snapshot() sem precisar
         # de um timer de fundo.
         self.daily_counts = {}
 
@@ -67,11 +68,14 @@ class WatcherState:
                 self.total_count += 1
                 project = event.get("project", "?")
                 self.per_project[project] = self.per_project.get(project, 0) + 1
+                cost_usd = float(event.get("cost_usd") or 0)
+                self.total_cost_usd += cost_usd
                 severity = event.get("severity", "baixa")
                 day = (event.get("ts") or "")[:10]
                 if day:
-                    bucket = self.daily_counts.setdefault(day, {"total": 0, "critical": 0})
+                    bucket = self.daily_counts.setdefault(day, {"total": 0, "critical": 0, "cost_usd": 0.0})
                     bucket["total"] += 1
+                    bucket["cost_usd"] += cost_usd
                     if severity == "alta":
                         bucket["critical"] += 1
                 if not historical:
@@ -127,22 +131,27 @@ class WatcherState:
         reviews_this_hour, reviews_hour_limit = rate_limit_status()
         today = datetime.now().strftime("%Y-%m-%d")
         with self.lock:
-            today_stats = self.daily_counts.get(today, {"total": 0, "critical": 0})
+            today_stats = self.daily_counts.get(today, {"total": 0, "critical": 0, "cost_usd": 0.0})
             return {
                 "uptime": time.time() - self.started_at,
                 "paused": paused,
+                "paused_until": control.get("paused_until"),
                 "reviewing": self.reviewing,
                 "watcher_alive": watcher_alive,
                 "session_count": self.session_count,
                 "total_count": self.total_count,
+                "total_cost_usd": self.total_cost_usd,
                 "review_seconds": self.review_seconds,
                 "reviews_this_hour": reviews_this_hour,
                 "reviews_hour_limit": reviews_hour_limit,
                 "today_total": today_stats["total"],
                 "today_critical": today_stats["critical"],
+                "today_cost_usd": today_stats.get("cost_usd", 0.0),
                 "llm_provider": control.get("llm_provider", "claude"),
                 "openai_api_key": control.get("openai_api_key", ""),
                 "openai_model": control.get("openai_model", "gpt-4o"),
+                "max_reviews_per_hour": control.get("max_reviews_per_hour"),
+                "notify_severity": control.get("notify_severity", "alta"),
                 "projects": [
                     {"name": p["name"], "path": p["path"],
                      "exists": p["exists"], "is_git": p["is_git"],
