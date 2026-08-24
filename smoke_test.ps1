@@ -31,15 +31,37 @@ if (-not (Test-Path $watcherScript)) {
     exit 1
 }
 
-function Stop-LeftoverWatcherProcesses {
+# IMPORTANTE: nao usar "pythonw" pelado. Nesta maquina isso as vezes resolve
+# para o shim do Windows Apps (WindowsApps\pythonw.exe), que re-executa o
+# interpretador de verdade como um PROCESSO FILHO SEPARADO — Start-Process
+# entao devolve o PID do shim, nao o do processo real, e Stop-Process nesse
+# PID deixa o processo real orfao (ja aconteceu, ficou "Code Watcher" duplicado
+# rodando depois de um smoke test). Resolvendo o caminho completo de antemao
+# (igual ao atalho da Area de Trabalho) evita esse shim por completo.
+$pythonwCmd = Get-Command pythonw -ErrorAction SilentlyContinue
+$pythonwPath = if ($pythonwCmd -and $pythonwCmd.Source -notlike "*WindowsApps*") {
+    $pythonwCmd.Source
+} else {
+    "C:\Users\User\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe"
+}
+if (-not (Test-Path $pythonwPath)) {
+    Write-Error "pythonw.exe nao encontrado em $pythonwPath (ajuste a variavel no script)"
+    exit 1
+}
+
+function Get-WatcherProcesses {
     Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like "*watcher_gui.py*" } |
-        ForEach-Object {
-            try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
-        }
+        Where-Object { $_.CommandLine -like "*watcher_gui.py*" }
+}
+
+function Stop-LeftoverWatcherProcesses {
+    Get-WatcherProcesses | ForEach-Object {
+        try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
 Write-Host "=== Smoke test do Code Watcher: $Tentativas tentativas ==="
+Write-Host "(usando $pythonwPath)"
 Stop-LeftoverWatcherProcesses
 Start-Sleep -Seconds 1
 
@@ -47,25 +69,32 @@ $falhas = 0
 
 for ($i = 1; $i -le $Tentativas; $i++) {
     Write-Host "--- tentativa $i/$Tentativas ---"
-    $p = Start-Process -FilePath "pythonw" -ArgumentList "`"$watcherScript`" --show" -PassThru
+    Start-Process -FilePath $pythonwPath -ArgumentList "`"$watcherScript`" --show"
     Start-Sleep -Seconds $EsperaSegundos
 
-    $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-    if (-not $proc) {
+    # Identifica o processo real pela linha de comando, nao pelo PID que
+    # Start-Process devolveu (ver nota acima sobre o shim do WindowsApps).
+    $found = Get-WatcherProcesses
+    if (-not $found) {
         Write-Host "  FALHA: processo encerrou sozinho (crash na inicializacao)." -ForegroundColor Red
         $falhas++
-    } elseif (-not $proc.Responding) {
-        Write-Host "  FALHA: processo travado (Not Responding)." -ForegroundColor Red
-        $falhas++
     } else {
-        Write-Host "  OK: respondendo normalmente." -ForegroundColor Green
+        $travou = $false
+        foreach ($w in $found) {
+            $proc = Get-Process -Id $w.ProcessId -ErrorAction SilentlyContinue
+            if ($proc -and -not $proc.Responding) { $travou = $true }
+        }
+        if ($travou) {
+            Write-Host "  FALHA: processo travado (Not Responding)." -ForegroundColor Red
+            $falhas++
+        } else {
+            Write-Host "  OK: respondendo normalmente." -ForegroundColor Green
+        }
     }
 
-    if ($proc) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    Stop-LeftoverWatcherProcesses
     Start-Sleep -Seconds 2
 }
-
-Stop-LeftoverWatcherProcesses
 
 Write-Host ""
 if ($falhas -eq 0) {
