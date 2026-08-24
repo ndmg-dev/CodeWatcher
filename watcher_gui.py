@@ -492,17 +492,43 @@ class App:
             self.window.restore()   # traz de volta se estava minimizada
         except Exception:
             pass
-        # `restore()`/`show()` do WebView2 podem devolver a janela pra ultima
-        # posicao que o Windows lembra pro par (titulo, classe) dela — que em
-        # maquina com 2+ monitores pode ser um monitor secundario, mesmo
-        # tendo passado x/y/screen explicitos na criacao. `move()` forca a
-        # posicao de novo toda vez que a janela e mostrada, sem depender de
-        # nenhuma memoria de posicao do sistema.
+        # `restore()`/`show()` do pywebview passam pelo WindowState do
+        # WinForms via Invoke() assincrono — em maquina com 2+ monitores,
+        # observamos a janela acabar minimizada de verdade (GetWindowRect
+        # retornando o sentinel -32000,-32000 do Windows) mesmo chamando
+        # `.move()` do pywebview logo em seguida, provavelmente uma corrida
+        # entre essas chamadas encadeadas. Em vez de depender da sequencia
+        # show()/restore()/move() do pywebview, usamos ShowWindow(SW_RESTORE)
+        # + SetWindowPos direto do Win32 sobre o handle real da janela — e
+        # sincrono e determinístico, sem essa corrida.
         if self._win_pos is not None:
-            try:
-                self.window.move(*self._win_pos)
-            except Exception:
-                pass
+            self._force_show_at(*self._win_pos)
+
+    def _force_show_at(self, x, y):
+        """Restaura (se minimizada) e reposiciona a janela via Win32 direto.
+
+        Contorna a corrida entre show()/restore()/move() do pywebview (ver
+        show_window acima). FindWindowW pelo titulo evita depender de algum
+        handle interno do pywebview que pode nao estar pronto ainda.
+        """
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.FindWindowW(None, "Code Watcher")
+            if not hwnd:
+                cw.log("  ! _force_show_at: janela 'Code Watcher' nao encontrada")
+                return
+            SW_RESTORE = 9
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW = 0x0001, 0x0004, 0x0040
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.SetWindowPos(
+                hwnd, None, x, y, 0, 0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
+            )
+            user32.SetForegroundWindow(hwnd)
+            cw.log(f"  = janela restaurada e movida para ({x}, {y}) via Win32")
+        except Exception as exc:
+            cw.log(f"  ! _force_show_at falhou: {exc}")
 
     def on_closing(self):
         """X da janela apenas esconde — o app continua na bandeja."""
@@ -589,6 +615,7 @@ class App:
         primary_screen = next(
             (s for s in webview.screens if s.x == 0 and s.y == 0), None
         )
+        cw.log(f"  telas: {webview.screens} | primario: {primary_screen}")
         if primary_screen is not None:
             win_x = max(0, (primary_screen.width - win_w) // 2)
             win_y = max(0, (primary_screen.height - win_h) // 2)
