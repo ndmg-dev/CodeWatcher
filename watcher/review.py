@@ -77,7 +77,8 @@ def review_with_llm(repo_root, prompt_template, diff, **fields):
 def append_to_review_log(repo_root, rel_path, review, severity=None):
     """Anexa a revisao ao review-log.md na raiz do projeto."""
     log_path = os.path.join(repo_root, REVIEW_LOG_NAME)
-    severity_line = f"**Severidade:** {severity}\n\n" if severity else ""
+    severity_display = {"alta": "alta", "media": "média", "baixa": "baixa"}.get(severity, severity)
+    severity_line = f"**Severidade:** {severity_display}\n\n" if severity else ""
     entry = (
         f"\n## {datetime.now():%Y-%m-%d %H:%M:%S} — `{rel_path}`\n\n"
         f"{severity_line}{review}\n"

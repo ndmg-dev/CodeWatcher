@@ -90,23 +90,23 @@ class App:
         try:
             picked = self.window.create_file_dialog(webview.FOLDER_DIALOG)
         except Exception as exc:
-            return {"ok": False, "msg": f"Nao foi possivel abrir o seletor: {exc}"}
+            return {"ok": False, "msg": f"Não foi possível abrir o seletor: {exc}"}
         if not picked:
             return {"ok": False, "msg": ""}
 
         path = os.path.abspath(picked[0])
 
         if not os.path.isdir(path):
-            return {"ok": False, "msg": "Pasta nao encontrada."}
+            return {"ok": False, "msg": "Pasta não encontrada."}
         if not is_git_repo(path):
             return {"ok": False,
-                    "msg": f"'{os.path.basename(path)}' nao e um repositorio git "
+                    "msg": f"'{os.path.basename(path)}' não é um repositório git "
                            f"(sem pasta .git). O watcher precisa do git para "
                            f"calcular o diff."}
 
         dirs = load_watched_dirs()
         if any(os.path.normcase(d) == os.path.normcase(path) for d in dirs):
-            return {"ok": False, "msg": "Essa pasta ja esta sendo monitorada."}
+            return {"ok": False, "msg": "Essa pasta já está sendo monitorada."}
 
         dirs.append(path)
         save_watched_dirs(dirs)
@@ -118,19 +118,19 @@ class App:
         try:
             picked = self.window.create_file_dialog(webview.FOLDER_DIALOG)
         except Exception as exc:
-            return {"ok": False, "msg": f"Nao foi possivel abrir o seletor: {exc}",
+            return {"ok": False, "msg": f"Não foi possível abrir o seletor: {exc}",
                     "repos": []}
         if not picked:
             return {"ok": False, "msg": "", "repos": []}
 
         root = os.path.abspath(picked[0])
         if not os.path.isdir(root):
-            return {"ok": False, "msg": "Pasta nao encontrada.", "repos": []}
+            return {"ok": False, "msg": "Pasta não encontrada.", "repos": []}
 
         found = discover_git_repos(root)
         if not found:
             return {"ok": False,
-                    "msg": f"Nenhum repositorio git encontrado dentro de "
+                    "msg": f"Nenhum repositório git encontrado dentro de "
                            f"'{os.path.basename(root)}'.",
                     "repos": []}
 
@@ -139,7 +139,7 @@ class App:
                   "already": os.path.normcase(p) in current}
                  for p in sorted(found, key=str.lower)]
         return {"ok": True,
-                "msg": f"{len(found)} repositorio(s) encontrado(s) em "
+                "msg": f"{len(found)} repositório(s) encontrado(s) em "
                        f"'{os.path.basename(root)}'.",
                 "repos": repos}
 
@@ -170,17 +170,17 @@ class App:
         if added:
             parts.append(f"{len(added)} adicionado(s): {', '.join(added)}.")
         if skipped:
-            parts.append(f"{len(skipped)} ignorado(s) (nao sao repos git): "
+            parts.append(f"{len(skipped)} ignorado(s) (não são repos git): "
                          f"{', '.join(skipped)}.")
         return {"ok": bool(added), "msg": " ".join(parts)}
 
     def retry_commit(self, project, sha):
         if not sha:
-            return {"ok": False, "msg": "Commit invalido."}
+            return {"ok": False, "msg": "Commit inválido."}
         path = next((p["path"] for p in self.state.current_projects()
                      if p["name"] == project), None)
         if not path:
-            return {"ok": False, "msg": f"Projeto '{project}' nao encontrado."}
+            return {"ok": False, "msg": f"Projeto '{project}' não encontrado."}
 
         threading.Thread(target=retry_commit_review, args=(path, sha),
                          daemon=True).start()
@@ -191,7 +191,7 @@ class App:
         kept = [d for d in dirs
                 if os.path.normcase(d) != os.path.normcase(os.path.abspath(path))]
         if len(kept) == len(dirs):
-            return {"ok": False, "msg": "Pasta nao estava na lista."}
+            return {"ok": False, "msg": "Pasta não estava na lista."}
         save_watched_dirs(kept)
         self.restart_watcher()
         return {"ok": True,
