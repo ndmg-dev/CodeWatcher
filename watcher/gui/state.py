@@ -17,6 +17,13 @@ from ..review import rate_limit_status, rate_limit_buckets
 DAILY_TREND_DAYS = 14
 
 FEED_LIMIT = 60
+# O painel faz polling de get_state() a cada poucos segundos (ver ui.html);
+# mandar o markdown inteiro de ate 60 revisoes em cada chamada pela ponte
+# COM do pywebview (WinForms) e caro e, empiricamente, parece contribuir
+# para vazamento de memoria real no processo (visto crescer a varios GB em
+# poucos minutos). O texto completo sempre continua disponivel no
+# review-log.md do projeto — o painel so precisa mostrar um preview.
+MAX_FEED_REVIEW_CHARS = 2000
 
 
 class WatcherState:
@@ -174,8 +181,19 @@ class WatcherState:
                      "count": self.per_project.get(p["name"], 0)}
                     for p in projects
                 ],
-                "feed": list(self.feed),
+                "feed": [self._feed_card_for_output(c) for c in self.feed],
             }
+
+    @staticmethod
+    def _feed_card_for_output(card):
+        """Copia rasa do card com o texto da revisao truncado — ver
+        MAX_FEED_REVIEW_CHARS. self.feed em si fica intacto."""
+        review = card.get("review") or ""
+        if len(review) <= MAX_FEED_REVIEW_CHARS:
+            return card
+        out = dict(card)
+        out["review"] = review[:MAX_FEED_REVIEW_CHARS] + "\n\n... (veja o review-log.md do projeto para o texto completo)"
+        return out
 
 
 def tail_events(state, stop_flag, on_live_event=None):
