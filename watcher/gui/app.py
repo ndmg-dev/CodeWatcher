@@ -288,14 +288,38 @@ class App:
         if self.window:
             self.window.destroy()
 
+    # -- notificacoes ---------------------------------------------------------
+
+    def _notify_if_critical(self, event):
+        """Chamado para cada evento novo (nao historico) — mostra um balao da
+        bandeja quando uma revisao termina com severidade alta, ja que o
+        painel normalmente fica minimizado na bandeja e um bug real pode
+        passar despercebido."""
+        if event.get("type") != "review_done" or event.get("severity") != "alta":
+            return
+        if not self.tray:
+            return
+        project = event.get("project", "?")
+        file_ = event.get("file", "?")
+        try:
+            self.tray.icon.notify(
+                f"{project} — {file_}\nAbra o painel para ver os detalhes.",
+                "Code Watcher: achado critico",
+            )
+        except Exception as exc:
+            log(f"  ! notificacao de achado critico falhou: {exc}")
+
     # -- ciclo de vida -------------------------------------------------------
 
     def run(self):
         write_control(paused=False)
         self.start_watcher()
 
-        threading.Thread(target=tail_events, args=(self.state, self.stop_flag),
-                         daemon=True).start()
+        threading.Thread(
+            target=tail_events,
+            args=(self.state, self.stop_flag, self._notify_if_critical),
+            daemon=True,
+        ).start()
 
         self.tray = setup_tray(self)
 

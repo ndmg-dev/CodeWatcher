@@ -56,6 +56,7 @@ CONTROL_FILE = os.path.join(STATE_DIR, "control.json")
 PROJECTS_FILE = os.path.join(STATE_DIR, "projects.json")
 SEEN_COMMITS_FILE = os.path.join(STATE_DIR, "seen_commits.json")
 SEEN_PRS_FILE = os.path.join(STATE_DIR, "seen_prs.json")
+SEEN_DIFF_HASHES_FILE = os.path.join(STATE_DIR, "seen_diff_hashes.json")
 WATCHER_LOG_FILE = os.path.join(STATE_DIR, "watcher.log")
 
 def read_control():

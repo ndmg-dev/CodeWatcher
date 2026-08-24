@@ -80,6 +80,7 @@ Em `%LOCALAPPDATA%\CodeWatcher\`:
 | `projects.json` | **Fonte da verdade** da lista de pastas monitoradas. Editado pelo painel. |
 | `events.jsonl` | Log append-only de eventos. Alimenta o feed e o total histórico. Rotacionado automaticamente acima de 5MB (ver seção 4, "Rotação de `events.jsonl`"). |
 | `events_summary.json` | Contagem (total e por projeto) dos eventos já rotacionados/removidos de `events.jsonl`. Gerado automaticamente, não editar à mão. |
+| `seen_diff_hashes.json` | Último hash de diff revisado por arquivo/branch/PR — evita revisar de novo um diff idêntico (amend só de mensagem, rebase sem conflito). Gerado automaticamente. |
 | `control.json` | Estado de pausa (geral e por pasta) + provedor de LLM escolhido (Claude ou OpenAI) e credenciais da OpenAI. |
 | `watcher.log` | Saída do console do watcher (que não aparece mais, já que roda oculto). |
 
@@ -740,6 +741,54 @@ os eventos mais antigos são resumidos (contagem total e por projeto) em
 `EVENTS_KEEP_LINES` (2000) para o feed continuar mostrando histórico recente.
 `WatcherState` soma o resumo arquivado à contagem do que ainda está no
 arquivo, então o "Total histórico" nunca volta a zero por causa da rotação.
+
+### Severidade estruturada, notificação e resumo diário (2026-08-24)
+
+O prompt de revisão passou a pedir uma primeira linha no formato
+`SEVERIDADE: alta|media|baixa` (constante `SEVERITY_INSTRUCTIONS` em
+`watcher/llm.py`), extraída em `review.py` (`_extract_severity`) e removida
+do texto exibido antes de salvar. Se o modelo não seguir o formato, assume
+`baixa` — não quebra o fluxo, só não conta como crítico.
+
+Três funcionalidades usam esse campo:
+
+- **Notificação da bandeja em achado crítico:** `App._notify_if_critical()`
+  em `watcher/gui/app.py`, acionada via um callback opcional (`on_live_event`)
+  que `tail_events()` chama só para eventos novos (não no replay do
+  histórico no boot, senão notificaria tudo de uma vez ao abrir o app depois
+  de um tempo parado). Usa `pystray.Icon.notify()` — sem dependência nova.
+- **Resumo diário no painel:** `WatcherState.daily_counts`, um dicionário
+  `{"YYYY-MM-DD": {"total", "critical"}}` alimentado em `apply()` pela data
+  do próprio evento. `snapshot()` calcula `datetime.now()` a cada chamada
+  para escolher o dia — a virada de meia-noite se resolve sozinha, sem
+  precisar de um timer de fundo.
+- **Badge de severidade no card do feed** (`ui.html`) — só aparece quando
+  não é "baixa", para não poluir o feed com uma tag em toda revisão.
+
+### Deduplicação de diffs idênticos (2026-08-24)
+
+Um `git commit --amend` que só muda a mensagem, um rebase sem conflito, ou
+um push que força um PR sem mudança real de conteúdo, disparavam uma
+revisão nova do zero — mesmo cobrando o LLM por algo já revisado.
+
+`diff_fingerprint()` em `watcher/git.py` normaliza o diff (`\r\n` → `\n`,
+strip) e calcula um hash SHA-256. Antes de cada chamada ao LLM, `review.py`
+compara com o último hash revisado para aquela chave
+(`seen_diff_hashes.json`, chaveado por `repo:tipo:identificador` — arquivo
+usa o caminho relativo, commit usa o branch, PR usa o número). Hash igual
+→ pula a chamada, loga e (para commit/PR) marca como visto mesmo assim, para
+não ficar reprocessando o mesmo diff em toda tentativa.
+
+**Retry manual ignora a deduplicação de propósito** — se o usuário clicou
+"Revisar novamente", ele quer a revisão de novo, ponto; só o rate limit
+ainda se aplica.
+
+### Busca no painel (2026-08-24)
+
+Campo de texto no cabeçalho do feed (`#search-box` em `ui.html`), filtrando
+client-side por projeto, arquivo ou conteúdo da revisão — o feed já vive
+inteiro em memória no JS, então não precisou de nenhuma mudança no backend.
+Combina com o filtro por projeto já existente (clicar no nome da pasta).
 
 ### Deadlock intermitente ao mostrar a janela (2026-08-24)
 

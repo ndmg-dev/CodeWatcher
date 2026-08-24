@@ -13,6 +13,18 @@ from .logger import log
 # Prompt templates
 # ---------------------------------------------------------------------------
 
+SEVERITY_INSTRUCTIONS = """Antes de mais nada, na PRIMEIRA linha da resposta, exatamente neste formato:
+SEVERIDADE: alta
+ou
+SEVERIDADE: media
+ou
+SEVERIDADE: baixa
+
+Use "alta" para bugs reais, falhas de seguranca ou erros de logica que quebram
+o comportamento. Use "media" para melhorias importantes (performance,
+duplicacao, clareza) sem bug real. Use "baixa" quando nao houver nada
+relevante a apontar. Depois dessa linha, uma linha em branco e a revisao."""
+
 PROMPT_TEMPLATE = """Voce esta revisando uma alteracao de codigo ainda nao commitada.
 
 Arquivo: {path}
@@ -22,10 +34,12 @@ Diff (git diff HEAD):
 {diff}
 ```
 
+""" + SEVERITY_INSTRUCTIONS + """
+
 Revise focando em BUGS e MELHORIAS. Seja direto e conciso:
 - Liste bugs reais, erros de logica, casos de borda nao tratados e riscos de seguranca.
 - Depois, sugestoes objetivas de melhoria (clareza, performance, duplicacao).
-- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes."
+- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes." (depois da linha de severidade).
 Nao reescreva o arquivo inteiro nem repita o diff."""
 
 PROMPT_TEMPLATE_COMMIT = """Voce esta revisando um commit que acabou de ser feito.
@@ -38,10 +52,12 @@ Diff (git show):
 {diff}
 ```
 
+""" + SEVERITY_INSTRUCTIONS + """
+
 Revise focando em BUGS e MELHORIAS. Seja direto e conciso:
 - Liste bugs reais, erros de logica, casos de borda nao tratados e riscos de seguranca.
 - Depois, sugestoes objetivas de melhoria (clareza, performance, duplicacao).
-- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes."
+- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes." (depois da linha de severidade).
 Nao reescreva o arquivo inteiro nem repita o diff."""
 
 PROMPT_TEMPLATE_PR = """Voce esta revisando um Pull Request aberto no GitHub.
@@ -53,10 +69,12 @@ Diff (gh pr diff):
 {diff}
 ```
 
+""" + SEVERITY_INSTRUCTIONS + """
+
 Revise focando em BUGS e MELHORIAS. Seja direto e conciso:
 - Liste bugs reais, erros de logica, casos de borda nao tratados e riscos de seguranca.
 - Depois, sugestoes objetivas de melhoria (clareza, performance, duplicacao).
-- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes."
+- Se nao houver nada relevante a apontar, responda apenas "Sem observacoes." (depois da linha de severidade).
 Nao reescreva o arquivo inteiro nem repita o diff."""
 
 

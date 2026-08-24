@@ -174,6 +174,14 @@
   .pill.busy { color: var(--warn); border-color: #4a3a12; }
   .pill.dead { color: var(--err); border-color: #4a1f1f; }
 
+  #search-box {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); font-size: 12px; padding: 6px 10px;
+    border-radius: 20px; width: 200px; outline: none;
+  }
+  #search-box:focus { border-color: var(--accent); }
+  #search-box::placeholder { color: var(--muted); }
+
   #feed { flex: 1; overflow-y: auto; padding: 16px 22px 40px; }
 
   .card {
@@ -183,6 +191,14 @@
   }
   .card.running { border-left-color: var(--warn); }
   .card.failed  { border-left-color: var(--err); }
+  .severity-badge {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 2px 8px; border-radius: 10px; margin-left: 6px;
+    text-transform: uppercase; letter-spacing: .3px;
+  }
+  .severity-badge.alta  { color: var(--err); background: #3a1f1f; }
+  .severity-badge.media { color: var(--warn); background: #3a2f10; }
+  .severity-badge.baixa { color: var(--muted); background: var(--panel-2); }
   .retry-btn {
     background: none; border: 1px solid var(--err); color: var(--err);
     font-size: 11px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
@@ -269,12 +285,17 @@
       <div class="k">Revisoes nesta hora</div>
       <div class="v" id="s-rate">0/0</div>
     </div>
+    <div class="stat">
+      <div class="k">Resumo de hoje</div>
+      <div class="v" id="s-today">0 (0 criticos)</div>
+    </div>
   </div>
 </aside>
 
 <main>
   <header>
     <h2 id="feed-title">Feed de revisoes</h2>
+    <input id="search-box" type="text" placeholder="Buscar no feed..." oninput="onSearchInput(this.value)">
     <span class="pill" id="status">conectando</span>
   </header>
   <div id="feed">
@@ -386,6 +407,7 @@ function fmtTime(iso) {
 
 let lastRenderKey = "";
 let activeProjectFilter = null;
+let searchQuery = "";
 let currentState = null;
 
 function filterByProject(name) {
@@ -398,6 +420,12 @@ function clearProjectFilter() {
   activeProjectFilter = null;
   lastRenderKey = "";
   tick();
+}
+
+function onSearchInput(value) {
+  searchQuery = value.trim().toLowerCase();
+  lastRenderKey = "";   // forca redesenho do feed
+  if (currentState) render(currentState);
 }
 
 function render(state) {
@@ -458,20 +486,33 @@ function render(state) {
   document.getElementById("s-time").textContent = fmtDuration(state.review_seconds);
   const rateEl = document.getElementById("s-rate");
   rateEl.textContent = state.reviews_this_hour + "/" + state.reviews_hour_limit;
-  rateEl.style.color = state.reviews_this_hour >= state.reviews_hour_limit ? "var(--danger, #e05555)" : "";
+  rateEl.style.color = state.reviews_this_hour >= state.reviews_hour_limit ? "var(--err)" : "";
+  const todayEl = document.getElementById("s-today");
+  todayEl.textContent = state.today_total + " (" + state.today_critical + " criticos)";
+  todayEl.style.color = state.today_critical > 0 ? "var(--err)" : "";
 
   /* feed */
-  const visibleFeed = activeProjectFilter
+  let visibleFeed = activeProjectFilter
     ? state.feed.filter(c => c.project === activeProjectFilter)
     : state.feed;
+  if (searchQuery) {
+    visibleFeed = visibleFeed.filter(c =>
+      (c.file || "").toLowerCase().includes(searchQuery)
+      || (c.project || "").toLowerCase().includes(searchQuery)
+      || (c.review || "").toLowerCase().includes(searchQuery)
+    );
+  }
 
-  const key = activeProjectFilter + "|" + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
+  const key = activeProjectFilter + "|" + searchQuery + "|"
+    + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
   if (key === lastRenderKey) return;
   lastRenderKey = key;
 
   const feed = document.getElementById("feed");
   if (!visibleFeed.length) {
-    feed.innerHTML = activeProjectFilter
+    feed.innerHTML = searchQuery
+      ? `<div class="empty">Nenhuma revisao contendo "${esc(searchQuery)}".</div>`
+      : activeProjectFilter
       ? `<div class="empty">Nenhuma revisao de "${esc(activeProjectFilter)}" ainda.</div>`
       : '<div class="empty">Aguardando alteracoes nos projetos monitorados...</div>';
     return;
@@ -492,12 +533,16 @@ function render(state) {
     } else {
       body = '<div class="body">' + md(c.review || "") + "</div>";
     }
+    const severityBadge = (c.status === "done" && c.severity && c.severity !== "baixa")
+      ? `<span class="severity-badge ${esc(c.severity)}">${esc(c.severity)}</span>`
+      : "";
     return `<div class="card ${c.status}">
               <div class="head">
                 <span class="proj-tag">${c.project}</span>
                 ${c.source === "commit" ? '<span class="source-tag">commit</span>' : ""}
                 ${c.source === "pr" ? '<span class="source-tag">PR</span>' : ""}
                 <span class="file">${esc(c.file)}</span>
+                ${severityBadge}
                 <span class="time">${fmtTime(c.ts)}${
                   c.duration ? " &middot; " + c.duration + "s" : ""}</span>
               </div>

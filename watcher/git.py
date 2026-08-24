@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -6,12 +7,13 @@ import threading
 from .config import (
     CREATE_NO_WINDOW, GH_CMD, GH_TIMEOUT, IGNORED_DIRS,
     CODE_EXTENSIONS, REVIEW_LOG_NAME, STATE_DIR,
-    SEEN_COMMITS_FILE, SEEN_PRS_FILE,
+    SEEN_COMMITS_FILE, SEEN_PRS_FILE, SEEN_DIFF_HASHES_FILE,
 )
 from .logger import log
 
 
 _seen_commits_lock = threading.Lock()
+_seen_diff_hashes_lock = threading.Lock()
 _gh_warned_repos = set()
 
 
@@ -298,3 +300,40 @@ def mark_pr_seen(repo_key, number, head_sha):
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(seen, fh, ensure_ascii=False, indent=2)
     os.replace(tmp, SEEN_PRS_FILE)
+
+
+# --- Deduplicacao de diffs identicos ---------------------------------------
+
+def diff_fingerprint(diff):
+    """Hash estavel do diff, normalizando so quebras de linha e espaco em
+    branco supérfluo (nao a indentacao do codigo em si) — pega o caso comum
+    de 'mesma mudanca de novo' (amend so de mensagem, rebase sem conflito,
+    CRLF/LF) sem esconder uma mudanca real de conteudo por engano."""
+    normalized = diff.replace("\r\n", "\n").strip()
+    return hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
+
+
+def load_seen_diff_hashes():
+    try:
+        with open(SEEN_DIFF_HASHES_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def is_duplicate_diff(repo_key, kind, key, fingerprint):
+    """True se esse (repo, tipo, chave) ja foi revisado com o mesmo diff
+    (ex: mesmo arquivo, mesmo branch, mesmo numero de PR)."""
+    seen = load_seen_diff_hashes()
+    return seen.get(repo_key, {}).get(f"{kind}:{key}") == fingerprint
+
+
+def mark_diff_hash(repo_key, kind, key, fingerprint):
+    with _seen_diff_hashes_lock:
+        seen = load_seen_diff_hashes()
+        seen.setdefault(repo_key, {})[f"{kind}:{key}"] = fingerprint
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = SEEN_DIFF_HASHES_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(seen, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, SEEN_DIFF_HASHES_FILE)

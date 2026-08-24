@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 
 from ..config import EVENTS_FILE, read_control, load_watched_dirs, load_events_summary
 from ..git import project_name, is_git_repo
@@ -32,6 +33,11 @@ class WatcherState:
         self.review_seconds = 0.0
         self.reviewing = False
         self._seq = 0
+        # Resumo diario: {"YYYY-MM-DD": {"total": n, "critical": n}}. Chaveado
+        # pela data do proprio evento (nao "hoje" fixo no boot), entao a
+        # virada de meia-noite se resolve sozinha em snapshot() sem precisar
+        # de um timer de fundo.
+        self.daily_counts = {}
 
     @staticmethod
     def current_projects():
@@ -61,6 +67,13 @@ class WatcherState:
                 self.total_count += 1
                 project = event.get("project", "?")
                 self.per_project[project] = self.per_project.get(project, 0) + 1
+                severity = event.get("severity", "baixa")
+                day = (event.get("ts") or "")[:10]
+                if day:
+                    bucket = self.daily_counts.setdefault(day, {"total": 0, "critical": 0})
+                    bucket["total"] += 1
+                    if severity == "alta":
+                        bucket["critical"] += 1
                 if not historical:
                     self.session_count += 1
                     self.review_seconds += float(event.get("duration") or 0)
@@ -68,6 +81,7 @@ class WatcherState:
                     "status": "done",
                     "source": event.get("source", "file"),
                     "review": event.get("review", ""),
+                    "severity": severity,
                     "duration": event.get("duration"),
                     "ts": event.get("ts", ""),
                 })
@@ -111,7 +125,9 @@ class WatcherState:
         paused_projects = set(control["paused_projects"])
         projects = self.current_projects()
         reviews_this_hour, reviews_hour_limit = rate_limit_status()
+        today = datetime.now().strftime("%Y-%m-%d")
         with self.lock:
+            today_stats = self.daily_counts.get(today, {"total": 0, "critical": 0})
             return {
                 "uptime": time.time() - self.started_at,
                 "paused": paused,
@@ -122,6 +138,8 @@ class WatcherState:
                 "review_seconds": self.review_seconds,
                 "reviews_this_hour": reviews_this_hour,
                 "reviews_hour_limit": reviews_hour_limit,
+                "today_total": today_stats["total"],
+                "today_critical": today_stats["critical"],
                 "llm_provider": control.get("llm_provider", "claude"),
                 "openai_api_key": control.get("openai_api_key", ""),
                 "openai_model": control.get("openai_model", "gpt-4o"),
@@ -136,8 +154,13 @@ class WatcherState:
             }
 
 
-def tail_events(state, stop_flag):
-    """Le o historico e depois acompanha o arquivo de eventos em tempo real."""
+def tail_events(state, stop_flag, on_live_event=None):
+    """Le o historico e depois acompanha o arquivo de eventos em tempo real.
+
+    on_live_event(event), se passado, e chamado so para eventos NOVOS (nao
+    para o replay do historico no boot) — usado para disparar a notificacao
+    de achado critico sem reabrir notificacoes de coisas que ja aconteceram
+    antes desta execucao da GUI."""
     offset = 0
     if os.path.exists(EVENTS_FILE):
         with open(EVENTS_FILE, encoding="utf-8", errors="replace") as fh:
@@ -165,8 +188,14 @@ def tail_events(state, stop_flag):
                     line = line.strip()
                     if line:
                         try:
-                            state.apply(json.loads(line), historical=False)
+                            event = json.loads(line)
                         except ValueError:
-                            pass
+                            continue
+                        state.apply(event, historical=False)
+                        if on_live_event:
+                            try:
+                                on_live_event(event)
+                            except Exception:
+                                pass
                 offset = fh.tell()
         time.sleep(0.4)
