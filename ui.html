@@ -44,8 +44,9 @@
     display: flex; align-items: center; justify-content: space-between;
     user-select: none;
   }
+  .master { cursor: pointer; }
   .master:hover { border-color: var(--accent); }
-  .master .label { cursor: pointer; flex: 1; }
+  .master .label { flex: 1; }
   .master .state { font-size: 12px; font-weight: 600; }
 
   .snooze-select {
@@ -304,8 +305,8 @@
   </div>
 
   <div class="section-title">Monitoramento</div>
-  <div class="master" id="master">
-    <span class="label" onclick="toggleMaster()">Monitoramento geral</span>
+  <div class="master" id="master" onclick="toggleMaster()">
+    <span class="label">Monitoramento geral</span>
     <span class="state" id="master-state">—</span>
   </div>
   <select class="snooze-select" id="snooze-select" onchange="onSnoozeChange(this.value)">

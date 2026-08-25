@@ -329,7 +329,7 @@ class App:
         project = event.get("project", "?")
         file_ = event.get("file", "?")
         try:
-            self.tray.icon.notify(
+            self.tray.notify(
                 f"{project} — {file_}\nAbra o painel para ver os detalhes.",
                 "Code Watcher: achado critico",
             )
@@ -386,6 +386,17 @@ def run_gui():
     if not os.path.exists(UI_FILE):
         print(f"ui.html nao encontrado em {UI_FILE}", file=sys.stderr)
         return 1
+    if sys.platform == "win32":
+        # Sem isso, o Windows atribui as notificacoes de bandeja ao
+        # executavel real do processo (pythonw.exe), entao o toast aparece
+        # com o cabecalho "Python" em vez de "Code Watcher".
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "ndmg-dev.CodeWatcher"
+            )
+        except Exception:
+            pass
     App().run()
     return 0
 

@@ -4,8 +4,13 @@ import threading
 
 import pystray
 from PIL import Image, ImageDraw
+from pystray._util import win32
 
 from ..config import read_control
+
+# Nao definidas em pystray._util.win32 — valores padrao da Shell API.
+NIIF_USER = 0x00000004
+NIIF_LARGE_ICON = 0x00000020
 
 
 def make_icon_image(color, badge=None):
@@ -43,6 +48,21 @@ class TrayController:
             pystray.MenuItem(pause_label, lambda *_: self.app.toggle_master()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Sair", self.app.quit),
+        )
+
+    def notify(self, message, title):
+        """Como icon.notify(), mas forca o icone do app no balao (NIIF_USER
+        + NIIF_LARGE_ICON) — sem isso o Windows so mostra um icone se o
+        AppUserModelID do processo estiver registrado com um atalho no Menu
+        Iniciar, o que nao e o caso aqui."""
+        icon = self.icon
+        icon._message(
+            win32.NIM_MODIFY,
+            win32.NIF_INFO,
+            szInfo=message,
+            szInfoTitle=title,
+            dwInfoFlags=NIIF_USER | NIIF_LARGE_ICON,
+            hBalloonIcon=icon._icon_handle,
         )
 
     def refresh(self):
