@@ -441,6 +441,9 @@
     <span class="filter-chip inactive hidden" id="resolved-toggle" onclick="toggleShowResolved()" title="Mostrar itens ja resolvidos/dispensados">
       Mostrar resolvidos
     </span>
+    <span class="filter-chip inactive hidden" id="patterns-btn" onclick="openPatternsModal()" title="Analisar o backlog de todos os projetos em busca de padroes repetidos">
+      🔍 Detectar padrões
+    </span>
     <span class="pill" id="status">conectando</span>
   </header>
   <div id="feed">
@@ -514,7 +517,25 @@
     </div>
     <div class="modal-actions">
       <button onclick="closeAskModal()">Fechar</button>
+      <button onclick="copyToClipboard(lastAskAnswerText)">📋 Copiar</button>
       <button id="ask-submit" class="primary" onclick="submitAsk()">Perguntar</button>
+    </div>
+  </div>
+</div>
+
+<div id="patterns-modal" class="modal-overlay hidden">
+  <div class="modal" style="width: 560px">
+    <h3>Padrões repetidos entre projetos</h3>
+    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="font-size: 12px; color: var(--muted);">
+        Analisa os itens pendentes do backlog de todos os projetos e aponta achados que se repetem em mais de um.
+      </div>
+      <div id="patterns-answer" style="font-size: 13px; line-height: 1.5; max-height: 380px; overflow-y: auto;"></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closePatternsModal()">Fechar</button>
+      <button onclick="copyToClipboard(lastPatternsAnswerText)">📋 Copiar</button>
+      <button id="patterns-submit" class="primary" onclick="submitPatterns()">Analisar</button>
     </div>
   </div>
 </div>
@@ -630,6 +651,7 @@ function switchView(mode) {
   document.getElementById("tab-backlog").classList.toggle("active", mode === "backlog");
   document.getElementById("critical-toggle").classList.toggle("hidden", mode !== "feed");
   document.getElementById("resolved-toggle").classList.toggle("hidden", mode !== "backlog");
+  document.getElementById("patterns-btn").classList.toggle("hidden", mode !== "backlog");
   lastRenderKey = "";
   if (currentState) render(currentState);
 }
@@ -1003,6 +1025,26 @@ async function saveSettings() {
   tick();
 }
 
+let lastAskAnswerText = "";
+let lastPatternsAnswerText = "";
+
+function copyToClipboard(text) {
+  if (!text) { toast("Nada pra copiar ainda.", true); return; }
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); toast("Copiado!", false); }
+    catch (e) { toast("Falha ao copiar.", true); }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast("Copiado!", false)).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
 function openAskModal() {
   const sel = document.getElementById("ask-project");
   const projects = (currentState && currentState.projects) || [];
@@ -1010,6 +1052,7 @@ function openAskModal() {
   if (activeProjectFilter) sel.value = activeProjectFilter;
   document.getElementById("ask-answer").style.display = "none";
   document.getElementById("ask-question").value = "";
+  lastAskAnswerText = "";
   document.getElementById("ask-modal").classList.remove("hidden");
 }
 
@@ -1029,12 +1072,41 @@ async function submitAsk() {
   answerEl.innerHTML = '<span class="spinner"></span> Lendo o histórico e perguntando ao LLM (pode levar alguns segundos)...';
   try {
     const r = await window.pywebview.api.ask_history(project, question);
+    lastAskAnswerText = r.ok ? r.answer : "";
     answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
   } catch (e) {
     answerEl.innerHTML = `<span style="color: var(--err)">Falha ao perguntar: ${esc(String(e))}</span>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Perguntar";
+  }
+}
+
+function openPatternsModal() {
+  document.getElementById("patterns-answer").innerHTML = "";
+  lastPatternsAnswerText = "";
+  document.getElementById("patterns-modal").classList.remove("hidden");
+}
+
+function closePatternsModal() {
+  document.getElementById("patterns-modal").classList.add("hidden");
+}
+
+async function submitPatterns() {
+  const btn = document.getElementById("patterns-submit");
+  const answerEl = document.getElementById("patterns-answer");
+  btn.disabled = true;
+  btn.textContent = "Analisando...";
+  answerEl.innerHTML = '<span class="spinner"></span> Analisando o backlog de todos os projetos...';
+  try {
+    const r = await window.pywebview.api.detect_patterns();
+    lastPatternsAnswerText = r.ok ? r.answer : "";
+    answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
+  } catch (e) {
+    answerEl.innerHTML = `<span style="color: var(--err)">Falha ao analisar: ${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analisar";
   }
 }
 

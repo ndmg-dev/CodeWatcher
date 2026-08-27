@@ -16,6 +16,7 @@ from ..git import is_git_repo, discover_git_repos, project_name
 from ..logger import log, emit_event
 from ..ask import ask_history as _ask_history
 from ..monitor import main as watcher_main
+from ..patterns import detect_patterns as _detect_patterns
 from ..review import retry_commit_review, _allow_review
 from .backlog_store import set_backlog_status, reopen_backlog_item as _reopen_backlog_item
 from .state import WatcherState, tail_events
@@ -247,6 +248,25 @@ class App:
         if error:
             return {"ok": False, "msg": error}
         emit_event("history_query", project=project, question=question, cost_usd=cost_usd)
+        return {"ok": True, "answer": answer}
+
+    # -- padroes repetidos entre projetos ----------------------------------------
+
+    def detect_patterns(self):
+        """Analisa os itens ABERTOS do backlog (todos os projetos) em busca
+        de achados que se repetem em mais de um -- reusa a mesma lista que
+        alimenta a aba Backlog do painel, nao uma fonte de dados separada."""
+        state = self.state.snapshot(self.watcher_alive())
+        items = [i for i in state["backlog"] if i["status"] == "open"]
+        if len(items) < 2:
+            return {"ok": False, "msg": "Poucos itens pendentes no backlog ainda para detectar padrões (precisa de pelo menos 2)."}
+        if not _allow_review():
+            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+        answer, cost_usd, error = _detect_patterns(items)
+        if error:
+            return {"ok": False, "msg": error}
+        emit_event("history_query", project="(todos os projetos)",
+                   question="detectar padrões repetidos entre projetos", cost_usd=cost_usd)
         return {"ok": True, "answer": answer}
 
     # -- backlog ---------------------------------------------------------------

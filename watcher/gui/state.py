@@ -252,7 +252,15 @@ class WatcherState:
                      "count": self.per_project.get(p["name"], 0)}
                     for p in projects
                 ],
-                "feed": [self._feed_card_for_output(c) for c in self.feed],
+                # Card do feed some quando o item de backlog correspondente
+                # (mesmo id "projeto|arquivo|ts") foi resolvido/dispensado --
+                # pedido explicito do Arthur, pra nao ficar um achado tratado
+                # ainda poluindo o feed principal.
+                "feed": [
+                    self._feed_card_for_output(c) for c in self.feed
+                    if backlog_status.get(f"{c.get('project')}|{c.get('file')}|{c.get('ts')}", {})
+                       .get("status") not in ("done", "dismissed")
+                ],
                 "backlog": [
                     dict(item, status=backlog_status.get(item["id"], {}).get("status", "open"),
                          resolved_at=backlog_status.get(item["id"], {}).get("at"))
