@@ -99,6 +99,24 @@ class WatcherState:
                     "ts": event.get("ts", ""),
                 })
 
+            elif etype == "secret_found":
+                # Alerta instantaneo do scan local (watcher/secrets.py) — nao
+                # tem "running" antes (nao passa pela fila do LLM), entao so
+                # empilha um card novo direto, sem resolver nada pendente.
+                project = event.get("project", "?")
+                day = (event.get("ts") or "")[:10]
+                if day:
+                    bucket = self.daily_counts.setdefault(day, {"total": 0, "critical": 0, "cost_usd": 0.0})
+                    bucket["critical"] += 1
+                self._push({
+                    "id": self._next_id(), "status": "secret",
+                    "project": project, "file": event.get("file", "?"),
+                    "source": event.get("source", "file"),
+                    "ts": event.get("ts", ""), "duration": None,
+                    "severity": "alta", "findings": event.get("findings", []),
+                    "review": "",
+                })
+
             elif etype == "review_failed":
                 self.reviewing = False
                 self._resolve(event.get("project", "?"), event.get("file"), {

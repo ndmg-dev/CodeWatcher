@@ -16,6 +16,7 @@ from .llm import (
     PROMPT_TEMPLATE, PROMPT_TEMPLATE_COMMIT, PROMPT_TEMPLATE_PR, call_llm,
 )
 from .logger import log, emit_event
+from .secrets import scan_diff
 
 _RATE_WINDOW_SECONDS = 3600
 _rate_lock = threading.Lock()
@@ -89,6 +90,17 @@ def _extract_severity(review_text):
     return "baixa", review_text
 
 
+def _check_secrets(project, label, diff, source="file"):
+    """Roda o scan local de segredos e emite um evento imediato se achar algo
+    — independente do rate limit e sem esperar o LLM (ver watcher/secrets.py).
+    Nao bloqueia nem substitui a revisao normal, que continua rodando."""
+    findings = scan_diff(diff)
+    if findings:
+        log(f"  ! {len(findings)} possivel(is) segredo(s) exposto(s) em {label}.")
+        emit_event("secret_found", project=project, file=label, source=source,
+                   findings=findings)
+
+
 def review_with_llm(repo_root, prompt_template, diff, **fields):
     """Formata uma solicitacao de revisao e a envia ao provedor configurado.
     Retorna (texto, custo_usd_estimado) — custo e 0.0 fora da OpenAI."""
@@ -132,6 +144,8 @@ def process_file(repo_root, file_path):
     if is_duplicate_diff(repo_key, "file", rel_path, fingerprint):
         log(f"  - {rel_path}: diff identico ao ja revisado, pulando.")
         return
+
+    _check_secrets(project, rel_path, diff)
 
     if not _allow_review():
         log(f"  - {rel_path}: limite de revisoes/hora atingido, pulando.")
@@ -198,6 +212,8 @@ def process_ref_update(repo_root, branch):
         mark_commit_seen(repo_key, branch, sha)
         return
 
+    _check_secrets(project, label, diff, source="commit")
+
     if not _allow_review():
         log(f"  - {label}: limite de revisoes/hora atingido, pulando.")
         emit_event("review_failed", project=project, file=label, source="commit",
@@ -262,6 +278,8 @@ def process_pr(repo_root, pr):
         log(f"  - {label}: diff identico ao ultimo revisado (push sem mudanca real), pulando.")
         mark_pr_seen(repo_key, number, head_sha)
         return
+
+    _check_secrets(project, label, diff, source="pr")
 
     if not _allow_review():
         log(f"  - {label}: limite de revisoes/hora atingido, pulando.")

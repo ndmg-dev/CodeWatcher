@@ -295,6 +295,21 @@ class App:
         except Exception as exc:
             log(f"  ! _force_icon falhou: {exc}")
 
+    def _window_is_visible(self):
+        """True se a janela existe, esta visivel (nao escondida na bandeja)
+        e nao minimizada. Usado para nao notificar quando o usuario ja esta
+        de olho no painel."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.FindWindowW(None, "Code Watcher")
+            if not hwnd:
+                return False
+            return bool(user32.IsWindowVisible(hwnd)) and not bool(user32.IsIconic(hwnd))
+        except Exception as exc:
+            log(f"  ! _window_is_visible falhou: {exc}")
+            return False
+
     def on_closing(self):
         self.window.hide()
         return False
@@ -314,25 +329,40 @@ class App:
         bandeja quando uma revisao atinge o limiar configurado
         (Configuracoes > Notificar em), ja que o painel normalmente fica
         minimizado na bandeja e um bug real pode passar despercebido."""
-        if event.get("type") != "review_done":
+        etype = event.get("type")
+        is_secret = etype == "secret_found"
+        if etype != "review_done" and not is_secret:
             return
-        severity = event.get("severity")
-        threshold = read_control().get("notify_severity", "alta")
-        should_notify = (
-            (threshold == "alta" and severity == "alta")
-            or (threshold == "media" and severity in ("alta", "media"))
-        )
-        if not should_notify:
-            return
+        if not is_secret:
+            # Segredo exposto sempre notifica, sem depender do limiar
+            # configurado (Configuracoes > Notificar em) — e sempre grave.
+            severity = event.get("severity")
+            threshold = read_control().get("notify_severity", "alta")
+            should_notify = (
+                (threshold == "alta" and severity == "alta")
+                or (threshold == "media" and severity in ("alta", "media"))
+            )
+            if not should_notify:
+                return
         if not self.tray:
+            return
+        if self._window_is_visible():
             return
         project = event.get("project", "?")
         file_ = event.get("file", "?")
         try:
-            self.tray.notify(
-                f"{project} — {file_}\nAbra o painel para ver os detalhes.",
-                "Code Watcher: achado critico",
-            )
+            if is_secret:
+                findings = event.get("findings") or []
+                kinds = ", ".join(sorted({f.get("kind", "?") for f in findings}))
+                self.tray.notify(
+                    f"{project} — {file_}\n{kinds}\nAbra o painel para ver os detalhes.",
+                    "Code Watcher: possivel segredo exposto",
+                )
+            else:
+                self.tray.notify(
+                    f"{project} — {file_}\nAbra o painel para ver os detalhes.",
+                    "Code Watcher: achado critico",
+                )
         except Exception as exc:
             log(f"  ! notificacao de achado critico falhou: {exc}")
 

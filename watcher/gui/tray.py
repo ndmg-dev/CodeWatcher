@@ -11,6 +11,7 @@ from ..config import read_control
 # Nao definidas em pystray._util.win32 — valores padrao da Shell API.
 NIIF_USER = 0x00000004
 NIIF_LARGE_ICON = 0x00000020
+NIN_BALLOONUSERCLICK = 0x0405  # WM_USER + 5
 
 
 def make_icon_image(color, badge=None):
@@ -37,6 +38,21 @@ class TrayController:
         self.icon = pystray.Icon(
             "code_watcher", self.idle_icon, "Code Watcher", self._build_menu()
         )
+        self._hook_balloon_click()
+
+    def _hook_balloon_click(self):
+        """pystray so trata clique no icone (WM_LBUTTONUP) e no menu; um
+        clique no proprio balao de notificacao (NIN_BALLOONUSERCLICK) e
+        ignorado por padrao, entao a notificacao nunca abria o painel."""
+        original_on_notify = self.icon._on_notify
+
+        def _on_notify(wparam, lparam):
+            if lparam == NIN_BALLOONUSERCLICK:
+                self.app.show_window()
+                return
+            original_on_notify(wparam, lparam)
+
+        self.icon._message_handlers[win32.WM_NOTIFY] = _on_notify
 
     def _build_menu(self):
         def pause_label(_):

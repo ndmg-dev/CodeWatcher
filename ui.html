@@ -240,6 +240,14 @@
   }
   .card.running { border-left-color: var(--warn); }
   .card.failed  { border-left-color: var(--err); }
+  .card.secret  { border-left-color: var(--err); background: #2a1717; }
+  .secret-list { list-style: none; padding: 0; margin: 6px 0 0; }
+  .secret-list li {
+    font-size: 12px; padding: 5px 8px; margin-bottom: 4px;
+    background: var(--panel-2); border-radius: 5px;
+  }
+  .secret-list .kind { color: var(--err); font-weight: 600; margin-right: 6px; }
+  .secret-list code { font-size: 11px; color: var(--muted); }
   .severity-badge {
     display: inline-block; font-size: 10px; font-weight: 600;
     padding: 2px 8px; border-radius: 10px; margin-left: 6px;
@@ -691,7 +699,13 @@ function render(state) {
   const atTop = feed.scrollTop < 40;
   feed.innerHTML = visibleFeed.map(c => {
     let body;
-    if (c.status === "running") {
+    if (c.status === "secret") {
+      const items = (c.findings || []).map(f =>
+        `<li><span class="kind">${esc(f.kind)}</span>${f.file ? esc(f.file) + " — " : ""}<code>${esc(f.excerpt)}</code></li>`
+      ).join("");
+      body = '<div class="body">🔑 Possível segredo exposto, detectado pelo scan local (antes da revisão do LLM).'
+           + `<ul class="secret-list">${items}</ul></div>`;
+    } else if (c.status === "running") {
       body = '<div class="body"><span class="spinner"></span> Revisando alteração...</div>';
     } else if (c.status === "failed") {
       const shaMatch = c.source === "commit" && /^commit ([0-9a-f]+)/.exec(c.file || "");
