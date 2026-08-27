@@ -66,6 +66,11 @@ SEEN_COMMITS_FILE = os.path.join(STATE_DIR, "seen_commits.json")
 SEEN_PRS_FILE = os.path.join(STATE_DIR, "seen_prs.json")
 SEEN_DIFF_HASHES_FILE = os.path.join(STATE_DIR, "seen_diff_hashes.json")
 WATCHER_LOG_FILE = os.path.join(STATE_DIR, "watcher.log")
+# So o status (resolvido/dispensado) dos itens do backlog do painel -- os
+# itens em si sao derivados de events.jsonl em memoria (watcher/gui/state.py),
+# nao duplicados aqui. So a GUI le/escreve este arquivo; o motor headless
+# (monitor.py/review.py) nao sabe que backlog existe.
+BACKLOG_STATUS_FILE = os.path.join(STATE_DIR, "backlog_status.json")
 
 def _write_control_file(control):
     os.makedirs(STATE_DIR, exist_ok=True)

@@ -16,6 +16,7 @@ from ..git import is_git_repo, discover_git_repos, project_name
 from ..logger import log, emit_event
 from ..monitor import main as watcher_main
 from ..review import retry_commit_review
+from .backlog_store import set_backlog_status, reopen_backlog_item as _reopen_backlog_item
 from .state import WatcherState, tail_events
 from .tray import setup_tray
 
@@ -222,6 +223,20 @@ class App:
         paused = set(control["paused_projects"])
         paused.discard(name) if name in paused else paused.add(name)
         write_control(paused_projects=paused)
+        return True
+
+    # -- backlog ---------------------------------------------------------------
+
+    def resolve_backlog_item(self, item_id):
+        set_backlog_status(item_id, "done", datetime.now().isoformat(timespec="seconds"))
+        return True
+
+    def dismiss_backlog_item(self, item_id):
+        set_backlog_status(item_id, "dismissed", datetime.now().isoformat(timespec="seconds"))
+        return True
+
+    def reopen_backlog_item(self, item_id):
+        _reopen_backlog_item(item_id)
         return True
 
     # -- janela --------------------------------------------------------------

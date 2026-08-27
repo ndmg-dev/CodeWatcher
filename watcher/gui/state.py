@@ -13,10 +13,17 @@ from datetime import datetime, timedelta
 from ..config import EVENTS_FILE, read_control, load_watched_dirs, load_events_summary
 from ..git import project_name, is_git_repo
 from ..review import rate_limit_status, rate_limit_buckets
+from .backlog_store import load_backlog_status
 
 DAILY_TREND_DAYS = 14
 
 FEED_LIMIT = 60
+# Itens do backlog nao devem sumir so porque saiu do teto do feed (ver
+# FEED_LIMIT) -- um item pendente precisa continuar visivel ate o usuario
+# resolver/dispensar. Teto bem mais alto, mesma logica de nao guardar o
+# markdown inteiro (so um resumo curto) para nao pesar a ponte JS↔Python.
+BACKLOG_LIMIT = 300
+BACKLOG_EXCERPT_CHARS = 220
 # O painel faz polling de get_state() a cada poucos segundos (ver ui.html);
 # mandar o markdown inteiro de ate 60 revisoes em cada chamada pela ponte
 # COM do pywebview (WinForms) e caro e, empiricamente, parece contribuir
@@ -32,6 +39,9 @@ class WatcherState:
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.feed = []
+        # Fonte separada do feed -- ver BACKLOG_LIMIT. Mais recente primeiro,
+        # sem o markdown completo (so um resumo curto por item).
+        self.backlog_items = []
         summary = load_events_summary()
         # Baseline vinda de events.jsonl ja rotacionado (eventos antigos
         # arquivados como contagem em events_summary.json) — sem isso o
@@ -98,6 +108,12 @@ class WatcherState:
                     "duration": event.get("duration"),
                     "ts": event.get("ts", ""),
                 })
+                if severity in ("alta", "media"):
+                    self._push_backlog(
+                        project, event.get("file", "?"), event.get("ts", ""),
+                        source=event.get("source", "file"), severity=severity,
+                        excerpt=event.get("review", ""), kind=None,
+                    )
 
             elif etype == "secret_found":
                 # Alerta instantaneo do scan local (watcher/secrets.py) — nao
@@ -116,6 +132,12 @@ class WatcherState:
                     "severity": "alta", "findings": event.get("findings", []),
                     "review": "",
                 })
+                kinds = ", ".join(sorted({f.get("kind", "?") for f in event.get("findings", [])}))
+                self._push_backlog(
+                    project, event.get("file", "?"), event.get("ts", ""),
+                    source=event.get("source", "file"), severity="alta",
+                    excerpt=f"🔑 Possível segredo exposto: {kinds}", kind="secret",
+                )
 
             elif etype == "review_failed":
                 self.reviewing = False
@@ -136,6 +158,23 @@ class WatcherState:
     def _push(self, card):
         self.feed.insert(0, card)
         del self.feed[FEED_LIMIT:]
+
+    def _push_backlog(self, project, file, ts, source, severity, excerpt, kind):
+        """id determinístico (nao o contador de self._seq, que so faz
+        sentido dentro de uma execucao) -- assim o mesmo item recebe o mesmo
+        id no replay do historico e ao vivo, e o status gravado em
+        backlog_status.json (chaveado por esse id) casa certo depois de um
+        restart da GUI."""
+        item_id = f"{project}|{file}|{ts}"
+        excerpt = (excerpt or "").strip()
+        if len(excerpt) > BACKLOG_EXCERPT_CHARS:
+            excerpt = excerpt[:BACKLOG_EXCERPT_CHARS] + "…"
+        self.backlog_items.insert(0, {
+            "id": item_id, "project": project, "file": file, "ts": ts,
+            "source": source, "severity": severity, "kind": kind,
+            "excerpt": excerpt,
+        })
+        del self.backlog_items[BACKLOG_LIMIT:]
 
     def _resolve(self, project, file, updates):
         for card in self.feed:
@@ -158,6 +197,7 @@ class WatcherState:
         reviews_this_hour, reviews_hour_limit = rate_limit_status()
         hourly_trend = rate_limit_buckets()
         today = datetime.now().strftime("%Y-%m-%d")
+        backlog_status = load_backlog_status()
         with self.lock:
             today_stats = self.daily_counts.get(today, {"total": 0, "critical": 0, "cost_usd": 0.0})
             # Serie real (nao inventada) para o sparkline de "Total historico":
@@ -200,6 +240,11 @@ class WatcherState:
                     for p in projects
                 ],
                 "feed": [self._feed_card_for_output(c) for c in self.feed],
+                "backlog": [
+                    dict(item, status=backlog_status.get(item["id"], {}).get("status", "open"),
+                         resolved_at=backlog_status.get(item["id"], {}).get("at"))
+                    for item in self.backlog_items
+                ],
             }
 
     @staticmethod

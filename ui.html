@@ -215,6 +215,32 @@
     color: var(--muted); background: transparent; border-color: var(--border);
   }
   .filter-chip.inactive:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+  .hidden { display: none !important; }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    font-size: 13px; font-weight: 600; color: var(--muted);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); background: var(--panel-2); }
+  .tab-badge {
+    display: inline-block; min-width: 16px; text-align: center;
+    font-size: 10px; font-weight: 700; color: var(--err);
+    background: #3a1f1f; border-radius: 10px; padding: 1px 5px;
+    margin-left: 5px;
+  }
+  .tab-badge:empty { display: none; }
+  .backlog-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .backlog-actions button {
+    font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  }
+  .backlog-actions button.resolve:hover { border-color: var(--ok); color: var(--ok); }
+  .backlog-actions button.dismiss:hover { border-color: var(--err); color: var(--err); }
+  .backlog-actions button.reopen:hover  { border-color: var(--accent); color: var(--accent); }
+  .backlog-status {
+    font-size: 11px; color: var(--muted); margin-top: 6px;
+  }
   .pill {
     font-size: 11px; padding: 4px 10px; border-radius: 20px;
     border: 1px solid var(--border); color: var(--muted);
@@ -241,6 +267,7 @@
   .card.running { border-left-color: var(--warn); }
   .card.failed  { border-left-color: var(--err); }
   .card.secret  { border-left-color: var(--err); background: #2a1717; }
+  .card.resolved { opacity: .55; border-left-color: var(--muted); }
   .secret-list { list-style: none; padding: 0; margin: 6px 0 0; }
   .secret-list li {
     font-size: 12px; padding: 5px 8px; margin-bottom: 4px;
@@ -397,11 +424,18 @@
 
 <main>
   <header>
+    <div class="tabs">
+      <span class="tab active" id="tab-feed" onclick="switchView('feed')">Feed</span>
+      <span class="tab" id="tab-backlog" onclick="switchView('backlog')">Backlog<span class="tab-badge" id="backlog-badge"></span></span>
+    </div>
     <h2 id="feed-title">Feed de revisões</h2>
     <input id="search-box" type="text" placeholder="Buscar no feed..." oninput="onSearchInput(this.value)">
     <span class="filter-chip inactive" id="critical-toggle" onclick="toggleCriticalFilter()" title="Mostrar so revisoes com severidade alta">
       <svg class="icon" viewBox="0 0 24 24" style="width:11px;height:11px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       So criticas
+    </span>
+    <span class="filter-chip inactive hidden" id="resolved-toggle" onclick="toggleShowResolved()" title="Mostrar itens ja resolvidos/dispensados">
+      Mostrar resolvidos
     </span>
     <span class="pill" id="status">conectando</span>
   </header>
@@ -563,6 +597,25 @@ let lastRenderKey = "";
 let activeProjectFilter = null;
 let searchQuery = "";
 let currentState = null;
+let viewMode = "feed";      // "feed" | "backlog"
+let showResolved = false;   // so vale para o backlog
+
+function switchView(mode) {
+  viewMode = mode;
+  document.getElementById("tab-feed").classList.toggle("active", mode === "feed");
+  document.getElementById("tab-backlog").classList.toggle("active", mode === "backlog");
+  document.getElementById("critical-toggle").classList.toggle("hidden", mode !== "feed");
+  document.getElementById("resolved-toggle").classList.toggle("hidden", mode !== "backlog");
+  lastRenderKey = "";
+  if (currentState) render(currentState);
+}
+
+function toggleShowResolved() {
+  showResolved = !showResolved;
+  document.getElementById("resolved-toggle").classList.toggle("inactive", !showResolved);
+  lastRenderKey = "";
+  if (currentState) render(currentState);
+}
 
 function filterByProject(name) {
   activeProjectFilter = (activeProjectFilter === name) ? null : name;
@@ -587,12 +640,17 @@ function render(state) {
   document.getElementById("uptime").textContent =
     "rodando há " + fmtDuration(state.uptime);
 
-  /* titulo do feed + chip de filtro */
+  /* titulo do feed/backlog + chip de filtro */
+  const baseTitle = viewMode === "backlog" ? "Backlog" : "Feed de revisões";
   const titleEl = document.getElementById("feed-title");
   titleEl.innerHTML = activeProjectFilter
-    ? `Feed de revisões <span class="filter-chip" onclick="clearProjectFilter()">`
+    ? `${baseTitle} <span class="filter-chip" onclick="clearProjectFilter()">`
       + `${esc(activeProjectFilter)} &times;</span>`
-    : "Feed de revisões";
+    : baseTitle;
+
+  /* badge de pendentes na aba Backlog — conta sempre, independente da aba ativa */
+  const openCount = (state.backlog || []).filter(i => i.status === "open").length;
+  document.getElementById("backlog-badge").textContent = openCount ? String(openCount) : "";
 
   /* status geral */
   const pill = document.getElementById("status");
@@ -665,6 +723,8 @@ function render(state) {
     ? "≈ " + fmtUsd(state.today_cost_usd) + " hoje (OpenAI, estimado)"
     : "";
 
+  if (viewMode === "backlog") { renderBacklog(state); return; }
+
   /* feed */
   let visibleFeed = activeProjectFilter
     ? state.feed.filter(c => c.project === activeProjectFilter)
@@ -680,7 +740,7 @@ function render(state) {
     );
   }
 
-  const key = activeProjectFilter + "|" + searchQuery + "|" + onlyCritical + "|"
+  const key = "feed|" + activeProjectFilter + "|" + searchQuery + "|" + onlyCritical + "|"
     + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
   if (key === lastRenderKey) return;
   lastRenderKey = key;
@@ -736,6 +796,80 @@ function render(state) {
             </div>`;
   }).join("");
   if (atTop) feed.scrollTop = 0;
+}
+
+function renderBacklog(state) {
+  let items = activeProjectFilter
+    ? (state.backlog || []).filter(i => i.project === activeProjectFilter)
+    : (state.backlog || []);
+  items = items.filter(i => showResolved || i.status === "open");
+  if (searchQuery) {
+    items = items.filter(i =>
+      (i.file || "").toLowerCase().includes(searchQuery)
+      || (i.project || "").toLowerCase().includes(searchQuery)
+      || (i.excerpt || "").toLowerCase().includes(searchQuery)
+    );
+  }
+
+  const key = "backlog|" + activeProjectFilter + "|" + searchQuery + "|" + showResolved + "|"
+    + JSON.stringify(items.map(i => [i.id, i.status]));
+  if (key === lastRenderKey) return;
+  lastRenderKey = key;
+
+  const feed = document.getElementById("feed");
+  if (!items.length) {
+    feed.innerHTML = searchQuery
+      ? `<div class="empty">Nenhum item do backlog contendo "${esc(searchQuery)}".</div>`
+      : showResolved
+      ? '<div class="empty">Nada no backlog ainda.</div>'
+      : '<div class="empty">Nenhum item pendente — tudo resolvido ou dispensado.</div>';
+    return;
+  }
+  const atTop = feed.scrollTop < 40;
+  const severityLabels = { alta: "alta", media: "média", baixa: "baixa" };
+  feed.innerHTML = items.map(i => {
+    const badge = `<span class="severity-badge ${esc(i.severity)}">${esc(severityLabels[i.severity] || i.severity)}</span>`;
+    const body = i.kind === "secret"
+      ? `<div class="body">${esc(i.excerpt)}</div>`
+      : '<div class="body">' + md(i.excerpt || "") + "</div>";
+    const actions = i.status === "open"
+      ? `<div class="backlog-actions">
+           <button class="resolve" onclick="resolveBacklogItem('${esc(i.id)}')">✓ Resolvido</button>
+           <button class="dismiss" onclick="dismissBacklogItem('${esc(i.id)}')">✕ Dispensar</button>
+         </div>`
+      : `<div class="backlog-status">${i.status === "done" ? "✓ Resolvido" : "✕ Dispensado"} em ${fmtTime(i.resolved_at)}
+           <button class="reopen" onclick="reopenBacklogItem('${esc(i.id)}')">↺ Reabrir</button>
+         </div>`;
+    return `<div class="card ${i.kind === "secret" ? "secret" : i.status !== "open" ? "resolved" : ""}">
+              <div class="head">
+                <span class="proj-tag">${i.project}</span>
+                ${i.source === "commit" ? '<span class="source-tag">commit</span>' : ""}
+                ${i.source === "pr" ? '<span class="source-tag">PR</span>' : ""}
+                <span class="file">${esc(i.file)}</span>
+                ${badge}
+                <span class="time">${fmtTime(i.ts)}</span>
+              </div>
+              ${body}
+              ${actions}
+            </div>`;
+  }).join("");
+  if (atTop) feed.scrollTop = 0;
+}
+
+async function resolveBacklogItem(id) {
+  await window.pywebview.api.resolve_backlog_item(id);
+  lastRenderKey = "";
+  tick();
+}
+async function dismissBacklogItem(id) {
+  await window.pywebview.api.dismiss_backlog_item(id);
+  lastRenderKey = "";
+  tick();
+}
+async function reopenBacklogItem(id) {
+  await window.pywebview.api.reopen_backlog_item(id);
+  lastRenderKey = "";
+  tick();
 }
 
 async function tick() {
