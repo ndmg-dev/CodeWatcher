@@ -17,6 +17,17 @@
     --err: #f87171;
   }
   * { box-sizing: border-box; }
+
+  /* Scrollbar customizada, fina e escura -- a padrao do Windows (cinza
+     clara) destoava do resto do tema em qualquer lista mais longa. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border); border-radius: 6px;
+    border: 2px solid var(--panel); background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
@@ -65,7 +76,10 @@
   }
   .proj:hover { border-color: var(--accent); }
   .proj .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .proj .dot.on  { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+  /* Sem glow no estado "on": e o estado default de quase toda a lista,
+     nao precisa gritar -- so o "off" (excecao, pausado por escolha) e
+     que vale destacar. */
+  .proj .dot.on  { background: var(--ok); }
   .proj .dot.off { background: var(--muted); }
   .proj .name { flex: 1; font-size: 13px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
@@ -216,13 +230,23 @@
   }
   .filter-chip.inactive:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
   .hidden { display: none !important; }
-  .tabs { display: flex; gap: 4px; }
+  /* Abas com indicador de sublinhado, nao pilula preenchida -- assim nao
+     competem de forma visual com os chips/pills de filtro e status ao
+     lado (mesma linha, gramaticas diferentes de proposito: aba = navegacao
+     entre views, pilula = filtro/estado). Divisor sutil separa os dois
+     grupos. */
+  .tabs {
+    display: flex; gap: 4px; padding-right: 14px; margin-right: 2px;
+    border-right: 1px solid var(--border); align-self: stretch;
+    align-items: center;
+  }
   .tab {
     font-size: 13px; font-weight: 600; color: var(--muted);
-    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    padding: 6px 4px; cursor: pointer;
+    border-bottom: 2px solid transparent;
   }
   .tab:hover { color: var(--text); }
-  .tab.active { color: var(--text); background: var(--panel-2); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
   .tab-badge {
     display: inline-block; min-width: 16px; text-align: center;
     font-size: 10px; font-weight: 700; color: var(--err);
