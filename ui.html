@@ -446,7 +446,8 @@
       Mostrar resolvidos
     </span>
     <span class="filter-chip inactive hidden" id="patterns-btn" onclick="openPatternsModal()" title="Analisar o backlog de todos os projetos em busca de padroes repetidos">
-      🔍 Detectar padrões
+      <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Detectar padrões
     </span>
     <span class="pill" id="status">conectando</span>
   </header>
@@ -521,7 +522,7 @@
     </div>
     <div class="modal-actions">
       <button onclick="closeAskModal()">Fechar</button>
-      <button onclick="copyToClipboard(lastAskAnswerText)">📋 Copiar</button>
+      <button onclick="copyToClipboard(lastAskAnswerText)"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copiar</button>
       <button id="ask-submit" class="primary" onclick="submitAsk()">Perguntar</button>
     </div>
   </div>
@@ -538,7 +539,7 @@
     </div>
     <div class="modal-actions">
       <button onclick="closePatternsModal()">Fechar</button>
-      <button onclick="copyToClipboard(lastPatternsAnswerText)">📋 Copiar</button>
+      <button onclick="copyToClipboard(lastPatternsAnswerText)"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copiar</button>
       <button id="patterns-submit" class="primary" onclick="submitPatterns()">Analisar</button>
     </div>
   </div>
@@ -558,7 +559,7 @@
     </div>
     <div class="modal-actions">
       <button onclick="closeSummaryModal()">Fechar</button>
-      <button onclick="copyToClipboard(lastSummaryAnswerText)">📋 Copiar</button>
+      <button onclick="copyToClipboard(lastSummaryAnswerText)"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copiar</button>
       <button id="summary-submit" class="primary" onclick="submitSummary()">Gerar</button>
     </div>
   </div>
@@ -833,7 +834,7 @@ function render(state) {
       const items = (c.findings || []).map(f =>
         `<li><span class="kind">${esc(f.kind)}</span>${f.file ? esc(f.file) + " — " : ""}<code>${esc(f.excerpt)}</code></li>`
       ).join("");
-      body = '<div class="body">🔑 Possível segredo exposto, detectado pelo scan local (antes da revisão do LLM).'
+      body = '<div class="body"><svg class="icon" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg> Possível segredo exposto, detectado pelo scan local (antes da revisão do LLM).'
            + `<ul class="secret-list">${items}</ul></div>`;
     } else if (c.status === "running") {
       body = '<div class="body"><span class="spinner"></span> Revisando alteração...</div>';
@@ -904,11 +905,11 @@ function renderBacklog(state) {
       : '<div class="body">' + md(i.excerpt || "") + "</div>";
     const actions = i.status === "open"
       ? `<div class="backlog-actions">
-           <button class="resolve" onclick="resolveBacklogItem('${esc(i.id)}')">✓ Resolvido</button>
-           <button class="dismiss" onclick="dismissBacklogItem('${esc(i.id)}')">✕ Dispensar</button>
+           <button class="resolve" onclick="resolveBacklogItem('${esc(i.id)}')">${ICON_CHECK} Resolvido</button>
+           <button class="dismiss" onclick="dismissBacklogItem('${esc(i.id)}')">${ICON_X} Dispensar</button>
          </div>`
-      : `<div class="backlog-status">${i.status === "done" ? "✓ Resolvido" : "✕ Dispensado"} em ${fmtTime(i.resolved_at)}
-           <button class="reopen" onclick="reopenBacklogItem('${esc(i.id)}')">↺ Reabrir</button>
+      : `<div class="backlog-status">${i.status === "done" ? ICON_CHECK + " Resolvido" : ICON_X + " Dispensado"} em ${fmtTime(i.resolved_at)}
+           <button class="reopen" onclick="reopenBacklogItem('${esc(i.id)}')">${ICON_UNDO} Reabrir</button>
          </div>`;
     return `<div class="card ${i.kind === "secret" ? "secret" : i.status !== "open" ? "resolved" : ""}">
               <div class="head">
@@ -1052,6 +1053,10 @@ async function saveSettings() {
 let lastAskAnswerText = "";
 let lastPatternsAnswerText = "";
 let lastSummaryAnswerText = "";
+
+const ICON_CHECK = '<svg class="icon" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+const ICON_X = '<svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+const ICON_UNDO = '<svg class="icon" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
 
 function copyToClipboard(text) {
   if (!text) { toast("Nada pra copiar ainda.", true); return; }
