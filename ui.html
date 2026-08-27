@@ -366,6 +366,10 @@
     <svg class="icon" viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4 2.83c-.68.24-1 .9-1 1.67v.5"/><line x1="12" y1="17" x2="12.01" y2="17"/><circle cx="12" cy="12" r="10"/></svg>
     Perguntar ao histórico
   </div>
+  <div class="add-btn" onclick="openSummaryModal()">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Resumo diário
+  </div>
   <div class="add-btn" onclick="openSettings()">
     <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     Configurações
@@ -536,6 +540,26 @@
       <button onclick="closePatternsModal()">Fechar</button>
       <button onclick="copyToClipboard(lastPatternsAnswerText)">📋 Copiar</button>
       <button id="patterns-submit" class="primary" onclick="submitPatterns()">Analisar</button>
+    </div>
+  </div>
+</div>
+
+<div id="summary-modal" class="modal-overlay hidden">
+  <div class="modal" style="width: 560px">
+    <h3>Resumo diário / standup</h3>
+    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+      <label style="font-size: 13px; font-weight: 600;">Período</label>
+      <select id="summary-period" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+        <option value="today">Hoje</option>
+        <option value="yesterday">Ontem (o que eu fiz ontem)</option>
+        <option value="week">Últimos 7 dias</option>
+      </select>
+      <div id="summary-answer" style="font-size: 13px; line-height: 1.5; max-height: 380px; overflow-y: auto;"></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeSummaryModal()">Fechar</button>
+      <button onclick="copyToClipboard(lastSummaryAnswerText)">📋 Copiar</button>
+      <button id="summary-submit" class="primary" onclick="submitSummary()">Gerar</button>
     </div>
   </div>
 </div>
@@ -1027,6 +1051,7 @@ async function saveSettings() {
 
 let lastAskAnswerText = "";
 let lastPatternsAnswerText = "";
+let lastSummaryAnswerText = "";
 
 function copyToClipboard(text) {
   if (!text) { toast("Nada pra copiar ainda.", true); return; }
@@ -1107,6 +1132,35 @@ async function submitPatterns() {
   } finally {
     btn.disabled = false;
     btn.textContent = "Analisar";
+  }
+}
+
+function openSummaryModal() {
+  document.getElementById("summary-answer").innerHTML = "";
+  lastSummaryAnswerText = "";
+  document.getElementById("summary-modal").classList.remove("hidden");
+}
+
+function closeSummaryModal() {
+  document.getElementById("summary-modal").classList.add("hidden");
+}
+
+async function submitSummary() {
+  const period = document.getElementById("summary-period").value;
+  const btn = document.getElementById("summary-submit");
+  const answerEl = document.getElementById("summary-answer");
+  btn.disabled = true;
+  btn.textContent = "Gerando...";
+  answerEl.innerHTML = '<span class="spinner"></span> Lendo o histórico do período e gerando o resumo...';
+  try {
+    const r = await window.pywebview.api.generate_summary(period);
+    lastSummaryAnswerText = r.ok ? r.answer : "";
+    answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
+  } catch (e) {
+    answerEl.innerHTML = `<span style="color: var(--err)">Falha ao gerar: ${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Gerar";
   }
 }
 

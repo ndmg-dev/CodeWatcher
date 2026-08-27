@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import webview
 
@@ -18,6 +18,7 @@ from ..ask import ask_history as _ask_history
 from ..monitor import main as watcher_main
 from ..patterns import detect_patterns as _detect_patterns
 from ..review import retry_commit_review, _allow_review
+from ..summary import generate_summary as _generate_summary
 from .backlog_store import set_backlog_status, reopen_backlog_item as _reopen_backlog_item
 from .state import WatcherState, tail_events
 from .tray import setup_tray
@@ -267,6 +268,35 @@ class App:
             return {"ok": False, "msg": error}
         emit_event("history_query", project="(todos os projetos)",
                    question="detectar padrões repetidos entre projetos", cost_usd=cost_usd)
+        return {"ok": True, "answer": answer}
+
+    # -- resumo diario / standup --------------------------------------------------
+
+    def generate_summary(self, period):
+        """period: 'today' | 'yesterday' | 'week'. Gera um resumo de todas
+        as revisoes do periodo, em todos os projetos -- fonte e o
+        events.jsonl direto (watcher/summary.py), nao o backlog."""
+        today = datetime.now().date()
+        if period == "today":
+            start = end = today.isoformat()
+            label = "hoje"
+        elif period == "yesterday":
+            d = (today - timedelta(days=1)).isoformat()
+            start = end = d
+            label = "ontem"
+        elif period == "week":
+            start = (today - timedelta(days=6)).isoformat()
+            end = today.isoformat()
+            label = "nos últimos 7 dias"
+        else:
+            return {"ok": False, "msg": "Período inválido."}
+        if not _allow_review():
+            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+        answer, cost_usd, error = _generate_summary(label, start, end)
+        if error:
+            return {"ok": False, "msg": error}
+        emit_event("history_query", project="(todos os projetos)",
+                   question=f"resumo do período: {label}", cost_usd=cost_usd)
         return {"ok": True, "answer": answer}
 
     # -- backlog ---------------------------------------------------------------
