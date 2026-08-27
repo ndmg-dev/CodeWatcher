@@ -436,7 +436,7 @@
       <span class="tab active" id="tab-feed" onclick="switchView('feed')">Feed</span>
       <span class="tab" id="tab-backlog" onclick="switchView('backlog')">Backlog<span class="tab-badge" id="backlog-badge"></span></span>
     </div>
-    <h2 id="feed-title">Feed de revisões</h2>
+    <span id="project-filter-chip"></span>
     <input id="search-box" type="text" placeholder="Buscar no feed..." oninput="onSearchInput(this.value)">
     <span class="filter-chip inactive" id="critical-toggle" onclick="toggleCriticalFilter()" title="Mostrar so revisoes com severidade alta">
       <svg class="icon" viewBox="0 0 24 24" style="width:11px;height:11px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -711,13 +711,10 @@ function render(state) {
   document.getElementById("uptime").textContent =
     "rodando há " + fmtDuration(state.uptime);
 
-  /* titulo do feed/backlog + chip de filtro */
-  const baseTitle = viewMode === "backlog" ? "Backlog" : "Feed de revisões";
-  const titleEl = document.getElementById("feed-title");
-  titleEl.innerHTML = activeProjectFilter
-    ? `${baseTitle} <span class="filter-chip" onclick="clearProjectFilter()">`
-      + `${esc(activeProjectFilter)} &times;</span>`
-    : baseTitle;
+  /* chip de filtro de projeto, ao lado das abas Feed/Backlog */
+  document.getElementById("project-filter-chip").innerHTML = activeProjectFilter
+    ? `<span class="filter-chip" onclick="clearProjectFilter()">${esc(activeProjectFilter)} &times;</span>`
+    : "";
 
   /* badge de pendentes na aba Backlog — conta sempre, independente da aba ativa */
   const openCount = (state.backlog || []).filter(i => i.status === "open").length;
@@ -1075,6 +1072,19 @@ function copyToClipboard(text) {
   }
 }
 
+/* As chamadas de LLM sob demanda (ask/patterns/summary) sao disparadas em
+   background no Python (ver App._run_async) -- aqui so ficamos perguntando
+   "terminou?" a cada 1s. Sem isso a chamada direta travaria a janela
+   inteira enquanto o LLM responde (ja aconteceu: WinForms mostrava "Não
+   está respondendo" pela duracao toda da chamada). */
+async function pollJob(jobId) {
+  while (true) {
+    const job = await window.pywebview.api.poll_job(jobId);
+    if (job.status === "done" || job.status === "error") return job.result;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
 function openAskModal() {
   const sel = document.getElementById("ask-project");
   const projects = (currentState && currentState.projects) || [];
@@ -1101,7 +1111,8 @@ async function submitAsk() {
   answerEl.style.display = "block";
   answerEl.innerHTML = '<span class="spinner"></span> Lendo o histórico e perguntando ao LLM (pode levar alguns segundos)...';
   try {
-    const r = await window.pywebview.api.ask_history(project, question);
+    const start = await window.pywebview.api.ask_history(project, question);
+    const r = await pollJob(start.job_id);
     lastAskAnswerText = r.ok ? r.answer : "";
     answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
   } catch (e) {
@@ -1129,7 +1140,8 @@ async function submitPatterns() {
   btn.textContent = "Analisando...";
   answerEl.innerHTML = '<span class="spinner"></span> Analisando o backlog de todos os projetos...';
   try {
-    const r = await window.pywebview.api.detect_patterns();
+    const start = await window.pywebview.api.detect_patterns();
+    const r = await pollJob(start.job_id);
     lastPatternsAnswerText = r.ok ? r.answer : "";
     answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
   } catch (e) {
@@ -1158,7 +1170,8 @@ async function submitSummary() {
   btn.textContent = "Gerando...";
   answerEl.innerHTML = '<span class="spinner"></span> Lendo o histórico do período e gerando o resumo...';
   try {
-    const r = await window.pywebview.api.generate_summary(period);
+    const start = await window.pywebview.api.generate_summary(period);
+    const r = await pollJob(start.job_id);
     lastSummaryAnswerText = r.ok ? r.answer : "";
     answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
   } catch (e) {

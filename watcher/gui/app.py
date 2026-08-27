@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 
 import webview
@@ -47,6 +48,13 @@ class App:
         self.window = None
         self.tray = None
         self._win_pos = None
+        # Resultados de chamadas de LLM sob demanda (ask/patterns/summary) --
+        # ver _run_async: essas chamadas do bridge NUNCA podem bloquear ate
+        # o LLM responder, senao travam a thread da UI do WinForms pela
+        # duracao inteira (ate 180s) e a janela vira "Nao esta respondendo".
+        # Mesmo cuidado que retry_commit ja tinha (roda em thread separada).
+        self._jobs = {}
+        self._jobs_lock = threading.Lock()
 
     # -- thread do watcher ----------------------------------------------------
 
@@ -79,6 +87,36 @@ class App:
 
     def get_state(self):
         return self.state.snapshot(self.watcher_alive())
+
+    def _run_async(self, fn):
+        """Roda fn() (sem argumentos) numa thread separada e devolve um
+        job_id na hora, pro JS acompanhar via poll_job(). fn deve devolver
+        o dict {"ok":..., ...} de resultado final."""
+        job_id = str(uuid.uuid4())
+        with self._jobs_lock:
+            self._jobs[job_id] = {"status": "pending"}
+
+        def runner():
+            try:
+                result = fn()
+            except Exception as exc:
+                result = {"ok": False, "msg": f"Erro inesperado: {exc}"}
+            with self._jobs_lock:
+                self._jobs[job_id] = {"status": "done", "result": result}
+
+        threading.Thread(target=runner, daemon=True).start()
+        return {"job_id": job_id}
+
+    def poll_job(self, job_id):
+        """Chamada rapida e repetida pelo JS (poll a cada ~1s) -- so olha um
+        dict em memoria, nunca bloqueia."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return {"status": "error", "result": {"ok": False, "msg": "Job não encontrado."}}
+            if job["status"] == "done":
+                del self._jobs[job_id]
+            return dict(job)
 
     def toggle_master(self):
         control = read_control()
@@ -231,50 +269,62 @@ class App:
     # -- pergunte ao historico ---------------------------------------------------
 
     def ask_history(self, project, question):
-        """Chamada sincrona (bloqueia a thread da ponte JS enquanto o LLM
-        responde) -- mesma classe de chamada que retry_commit ja faz. Reusa
-        o rate limit das revisoes normais (_allow_review): e a mesma conta
-        de LLM, o mesmo teto de custo deve valer aqui tambem."""
+        """So dispara o trabalho numa thread e devolve o job_id na hora --
+        ver _run_async. A chamada ao LLM pode levar dezenas de segundos;
+        bloquear a thread da ponte JS ate ela terminar trava a janela
+        inteira (WinForms mostra "Não está respondendo"). Reusa o rate
+        limit das revisoes normais (_allow_review): e a mesma conta de LLM,
+        o mesmo teto de custo deve valer aqui tambem."""
         question = (question or "").strip()
         if not question:
-            return {"ok": False, "msg": "Escreva uma pergunta."}
-        repo_root = next(
-            (p for p in load_watched_dirs() if project_name(p) == project), None
-        )
-        if not repo_root:
-            return {"ok": False, "msg": f"Projeto '{project}' não encontrado."}
-        if not _allow_review():
-            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
-        answer, cost_usd, error = _ask_history(repo_root, question)
-        if error:
-            return {"ok": False, "msg": error}
-        emit_event("history_query", project=project, question=question, cost_usd=cost_usd)
-        return {"ok": True, "answer": answer}
+            return self._run_async(lambda: {"ok": False, "msg": "Escreva uma pergunta."})
+
+        def work():
+            repo_root = next(
+                (p for p in load_watched_dirs() if project_name(p) == project), None
+            )
+            if not repo_root:
+                return {"ok": False, "msg": f"Projeto '{project}' não encontrado."}
+            if not _allow_review():
+                return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+            answer, cost_usd, error = _ask_history(repo_root, question)
+            if error:
+                return {"ok": False, "msg": error}
+            emit_event("history_query", project=project, question=question, cost_usd=cost_usd)
+            return {"ok": True, "answer": answer}
+
+        return self._run_async(work)
 
     # -- padroes repetidos entre projetos ----------------------------------------
 
     def detect_patterns(self):
-        """Analisa os itens ABERTOS do backlog (todos os projetos) em busca
-        de achados que se repetem em mais de um -- reusa a mesma lista que
-        alimenta a aba Backlog do painel, nao uma fonte de dados separada."""
-        state = self.state.snapshot(self.watcher_alive())
-        items = [i for i in state["backlog"] if i["status"] == "open"]
-        if len(items) < 2:
-            return {"ok": False, "msg": "Poucos itens pendentes no backlog ainda para detectar padrões (precisa de pelo menos 2)."}
-        if not _allow_review():
-            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
-        answer, cost_usd, error = _detect_patterns(items)
-        if error:
-            return {"ok": False, "msg": error}
-        emit_event("history_query", project="(todos os projetos)",
-                   question="detectar padrões repetidos entre projetos", cost_usd=cost_usd)
-        return {"ok": True, "answer": answer}
+        """Ver ask_history -- mesmo cuidado de nao bloquear a thread da
+        ponte JS. Analisa os itens ABERTOS do backlog (todos os projetos)
+        em busca de achados que se repetem em mais de um -- reusa a mesma
+        lista que alimenta a aba Backlog do painel, nao uma fonte de dados
+        separada."""
+        def work():
+            state = self.state.snapshot(self.watcher_alive())
+            items = [i for i in state["backlog"] if i["status"] == "open"]
+            if len(items) < 2:
+                return {"ok": False, "msg": "Poucos itens pendentes no backlog ainda para detectar padrões (precisa de pelo menos 2)."}
+            if not _allow_review():
+                return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+            answer, cost_usd, error = _detect_patterns(items)
+            if error:
+                return {"ok": False, "msg": error}
+            emit_event("history_query", project="(todos os projetos)",
+                       question="detectar padrões repetidos entre projetos", cost_usd=cost_usd)
+            return {"ok": True, "answer": answer}
+
+        return self._run_async(work)
 
     # -- resumo diario / standup --------------------------------------------------
 
     def generate_summary(self, period):
-        """period: 'today' | 'yesterday' | 'week'. Gera um resumo de todas
-        as revisoes do periodo, em todos os projetos -- fonte e o
+        """Ver ask_history -- mesmo cuidado de nao bloquear a thread da
+        ponte JS. period: 'today' | 'yesterday' | 'week'. Gera um resumo de
+        todas as revisoes do periodo, em todos os projetos -- fonte e o
         events.jsonl direto (watcher/summary.py), nao o backlog."""
         today = datetime.now().date()
         if period == "today":
@@ -289,15 +339,19 @@ class App:
             end = today.isoformat()
             label = "nos últimos 7 dias"
         else:
-            return {"ok": False, "msg": "Período inválido."}
-        if not _allow_review():
-            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
-        answer, cost_usd, error = _generate_summary(label, start, end)
-        if error:
-            return {"ok": False, "msg": error}
-        emit_event("history_query", project="(todos os projetos)",
-                   question=f"resumo do período: {label}", cost_usd=cost_usd)
-        return {"ok": True, "answer": answer}
+            return self._run_async(lambda: {"ok": False, "msg": "Período inválido."})
+
+        def work():
+            if not _allow_review():
+                return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+            answer, cost_usd, error = _generate_summary(label, start, end)
+            if error:
+                return {"ok": False, "msg": error}
+            emit_event("history_query", project="(todos os projetos)",
+                       question=f"resumo do período: {label}", cost_usd=cost_usd)
+            return {"ok": True, "answer": answer}
+
+        return self._run_async(work)
 
     # -- backlog ---------------------------------------------------------------
 
