@@ -139,6 +139,19 @@ class WatcherState:
                     excerpt=f"🔑 Possível segredo exposto: {kinds}", kind="secret",
                 )
 
+            elif etype == "history_query":
+                # "Pergunte ao histórico" (watcher/ask.py) usa o mesmo LLM
+                # configurado -- o custo real (OpenAI) conta pro mesmo total,
+                # senao o painel subestimaria o gasto. Nao mexe em
+                # total_count/per_project (isso e contagem de revisoes, nao
+                # de perguntas) nem entra no feed/backlog.
+                cost_usd = float(event.get("cost_usd") or 0)
+                self.total_cost_usd += cost_usd
+                day = (event.get("ts") or "")[:10]
+                if day and cost_usd:
+                    bucket = self.daily_counts.setdefault(day, {"total": 0, "critical": 0, "cost_usd": 0.0})
+                    bucket["cost_usd"] += cost_usd
+
             elif etype == "review_failed":
                 self.reviewing = False
                 self._resolve(event.get("project", "?"), event.get("file"), {

@@ -362,6 +362,10 @@
     <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     Buscar repositórios
   </div>
+  <div class="add-btn" onclick="openAskModal()">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4 2.83c-.68.24-1 .9-1 1.67v.5"/><line x1="12" y1="17" x2="12.01" y2="17"/><circle cx="12" cy="12" r="10"/></svg>
+    Perguntar ao histórico
+  </div>
   <div class="add-btn" onclick="openSettings()">
     <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     Configurações
@@ -491,6 +495,26 @@
     <div class="modal-actions">
       <button onclick="closeSettingsModal()">Cancelar</button>
       <button class="primary" onclick="saveSettings()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div id="ask-modal" class="modal-overlay hidden">
+  <div class="modal" style="width: 560px">
+    <h3>Perguntar ao histórico</h3>
+    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+      <label style="font-size: 13px; font-weight: 600;">Projeto</label>
+      <select id="ask-project" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;"></select>
+
+      <label style="font-size: 13px; font-weight: 600;">Pergunta</label>
+      <textarea id="ask-question" rows="3" placeholder="Ex: quais problemas de segurança já foram flagados esse mês?"
+                style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px; font: inherit; resize: vertical;"></textarea>
+
+      <div id="ask-answer" style="font-size: 13px; line-height: 1.5; max-height: 320px; overflow-y: auto; display: none;"></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeAskModal()">Fechar</button>
+      <button id="ask-submit" class="primary" onclick="submitAsk()">Perguntar</button>
     </div>
   </div>
 </div>
@@ -977,6 +1001,41 @@ async function saveSettings() {
   closeSettingsModal();
   toast("Configurações salvas.", false);
   tick();
+}
+
+function openAskModal() {
+  const sel = document.getElementById("ask-project");
+  const projects = (currentState && currentState.projects) || [];
+  sel.innerHTML = projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  if (activeProjectFilter) sel.value = activeProjectFilter;
+  document.getElementById("ask-answer").style.display = "none";
+  document.getElementById("ask-question").value = "";
+  document.getElementById("ask-modal").classList.remove("hidden");
+}
+
+function closeAskModal() {
+  document.getElementById("ask-modal").classList.add("hidden");
+}
+
+async function submitAsk() {
+  const project = document.getElementById("ask-project").value;
+  const question = document.getElementById("ask-question").value.trim();
+  if (!project || !question) { toast("Escolha um projeto e escreva uma pergunta.", true); return; }
+  const btn = document.getElementById("ask-submit");
+  const answerEl = document.getElementById("ask-answer");
+  btn.disabled = true;
+  btn.textContent = "Perguntando...";
+  answerEl.style.display = "block";
+  answerEl.innerHTML = '<span class="spinner"></span> Lendo o histórico e perguntando ao LLM (pode levar alguns segundos)...';
+  try {
+    const r = await window.pywebview.api.ask_history(project, question);
+    answerEl.innerHTML = r.ok ? md(r.answer) : `<span style="color: var(--err)">${esc(r.msg)}</span>`;
+  } catch (e) {
+    answerEl.innerHTML = `<span style="color: var(--err)">Falha ao perguntar: ${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Perguntar";
+  }
 }
 
 async function onSnoozeChange(minutes) {

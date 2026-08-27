@@ -14,8 +14,9 @@ from ..config import (
 )
 from ..git import is_git_repo, discover_git_repos, project_name
 from ..logger import log, emit_event
+from ..ask import ask_history as _ask_history
 from ..monitor import main as watcher_main
-from ..review import retry_commit_review
+from ..review import retry_commit_review, _allow_review
 from .backlog_store import set_backlog_status, reopen_backlog_item as _reopen_backlog_item
 from .state import WatcherState, tail_events
 from .tray import setup_tray
@@ -224,6 +225,29 @@ class App:
         paused.discard(name) if name in paused else paused.add(name)
         write_control(paused_projects=paused)
         return True
+
+    # -- pergunte ao historico ---------------------------------------------------
+
+    def ask_history(self, project, question):
+        """Chamada sincrona (bloqueia a thread da ponte JS enquanto o LLM
+        responde) -- mesma classe de chamada que retry_commit ja faz. Reusa
+        o rate limit das revisoes normais (_allow_review): e a mesma conta
+        de LLM, o mesmo teto de custo deve valer aqui tambem."""
+        question = (question or "").strip()
+        if not question:
+            return {"ok": False, "msg": "Escreva uma pergunta."}
+        repo_root = next(
+            (p for p in load_watched_dirs() if project_name(p) == project), None
+        )
+        if not repo_root:
+            return {"ok": False, "msg": f"Projeto '{project}' não encontrado."}
+        if not _allow_review():
+            return {"ok": False, "msg": "Limite de chamadas ao LLM atingido nesta hora. Tente de novo mais tarde."}
+        answer, cost_usd, error = _ask_history(repo_root, question)
+        if error:
+            return {"ok": False, "msg": error}
+        emit_event("history_query", project=project, question=question, cost_usd=cost_usd)
+        return {"ok": True, "answer": answer}
 
     # -- backlog ---------------------------------------------------------------
 
