@@ -64,13 +64,17 @@ que só importam de lá, mantidos por compatibilidade com o fluxo de uso
 | `watcher/logger.py` | `log()` (escreve em `watcher.log`, sem depender de stdout) e `emit_event()` (com rotação de `events.jsonl`). |
 | `watcher/monitor.py` | Motor: watchdog, debounce, fila serializada, polling de PRs, `main(stop_event=...)`. |
 | `watcher/review.py` | Pipelines de revisão (arquivo/commit/PR/retry), rate limit de chamadas ao LLM. |
+| `watcher/secrets.py` | Scan local de segredos/credenciais em diffs, roda antes/independente do LLM. |
+| `watcher/ask.py` | "Pergunte ao histórico" — pergunta em linguagem natural sobre o `review-log.md` de um projeto. |
+| `watcher/patterns.py` | Detecta achados que se repetem entre projetos diferentes, a partir do backlog. |
+| `watcher/summary.py` | Resumo de um período (hoje/ontem/7 dias) em todos os projetos, formato standup. |
 | `watcher/gui/app.py` | Janela pywebview, ponte JS↔Python, tray icon, ciclo de vida da GUI. |
 | `watcher/gui/state.py` | `WatcherState` — agrega eventos em memória para o painel consultar. |
 | `watcher/gui/tray.py` | Ícone da bandeja e menu. |
+| `watcher/gui/backlog_store.py` | Persiste o status (resolvido/dispensado) dos itens do backlog. |
 | `ui.html` | Todo o visual do painel (HTML/CSS/JS). Separado de propósito — mexer na aparência não arrisca a lógica. |
 | `smoke_test.ps1` | Abre a GUI N vezes seguidas e confere se trava — rodar depois de mudanças em `watcher_gui.py`/`watcher/gui/*.py`. |
 | `docs/code-watcher.md` | Este documento. |
-| `watcher-spec.md`, `watcher-gui-spec.md`, `watcher-gui-prompt.md` | Especificações originais. |
 
 ### Arquivos de estado (fora do projeto)
 
@@ -115,7 +119,7 @@ watcher/monitor.py (watcher/review.py, watcher/git.py, watcher/llm.py)
 > (`KILL_ON_JOB_CLOSE`) para não sobrar órfão se a GUI caísse. Isso foi
 > removido quando o motor virou thread do mesmo processo — o próprio
 > processo morrer já encerra a thread, e o Job Object não fazia mais
-> sentido nesse modelo. Ver seção 4 do `docs/context/HANDOFF-2.md`.
+> sentido nesse modelo.
 
 ### Comunicação entre os dois processos
 
@@ -242,7 +246,7 @@ aberto/atualizado" — nenhum arquivo no disco muda quando alguém interage
 com um PR no GitHub. Isso não cabe no mesmo mecanismo reativo dos commits;
 precisa de uma checagem periódica de rede.
 
-Decisões de escopo (confirmadas com o Arthur antes de codar):
+Decisões de escopo (definidas antes de codar):
 - **Somente leitura** — a revisão vai para o `review-log.md` e para o
   painel; nada é escrito de volta no GitHub.
 - **Autenticação via `gh` CLI** — o usuário roda `gh auth login` uma vez
@@ -539,8 +543,7 @@ Testado também **ponta a ponta contra a árvore real**
 (`C:\Users\User\Projetos`, automação de clique + seletor nativo): achou os
 12 repositórios corretos, excluiu corretamente os não-git e os que estavam
 dentro de `node_modules`. Esse teste real efetivamente adicionou 9 projetos
-novos ao monitoramento em produção — o Arthur confirmou que quer mantê-los
-(ver seção 6).
+novos ao monitoramento em produção, mantidos desde então (ver seção 6).
 
 ### Detecção de commits (2026-08-24) — 20/20 verificações + 2 testes reais
 
@@ -617,8 +620,8 @@ cenário simulado.
    eu interromper o processo; o `seen_commits.json` foi limpo e
    re-gerado do zero de forma consistente antes do redeploy.
 8. **Terminal/console piscando o tempo todo** — o bug mais visível e
-   incômodo de todos, relatado pelo Arthur em vários momentos ao longo do
-   dia (chegou a ser confundido com o Docker/WSL reiniciando, numa
+   incômodo de todos, percebido em vários momentos ao longo do dia
+   (chegou a ser confundido com o Docker/WSL reiniciando, numa
    investigação anterior que também era real, mas era um problema
    diferente). Causa raiz: nenhuma das 7 chamadas a `git`/`gh`/`claude`
    dentro de `code_watcher.py` passava `creationflags=CREATE_NO_WINDOW`.
@@ -707,10 +710,9 @@ tudo mais") — quebrada em fases:
   "Detecção de commits"). 100% local, sem autenticação.
 - ✅ **Fase 2, PRs do GitHub** — implementada em 2026-08-24 (seção 4, "PRs do
   GitHub: polling numa thread separada, somente leitura"). Somente leitura,
-  autenticação via `gh` CLI (instalado, v2.98.0). **Pendente do lado do
-  usuário:** rodar `gh auth login` manualmente — é um fluxo OAuth
-  interativo que este script não pode completar sozinho. Até lá, a leitura
-  de PRs fica desativada (ver seção 9).
+  autenticação via `gh` CLI (instalado, v2.98.0). Falta rodar
+  `gh auth login` manualmente — é um fluxo OAuth interativo, então não dá
+  pra automatizar. Até lá, a leitura de PRs fica desativada (ver seção 9).
   - Diferente do que a arquitetura original cogitava, `projects.json`
     **não** precisou crescer para `{"path":, "sources": [...]}` — o escopo
     de quem participa do polling é derivado automaticamente de
@@ -719,7 +721,7 @@ tudo mais") — quebrada em fases:
 ### Rate limit de revisões (2026-08-24)
 
 Com 12 projetos monitorados e um provedor de LLM pago por token (API da
-OpenAI, opção adicionada nesta mesma sessão), um repositório barulhento ou
+OpenAI, opção adicionada em paralelo a isto), um repositório barulhento ou
 um bug de loop poderiam gerar chamadas em excesso sem nenhum aviso.
 
 `review.py` mantém uma janela deslizante em memória (`_call_times`, thread-safe)
@@ -851,9 +853,9 @@ depender do loop de mensagens do WinForms, bastava usar só ele —
 com `smoke_test.ps1` (8 aberturas seguidas, 0 travamentos; antes travava de
 forma intermitente).
 
-**Terceira leitura, ainda sem pedido:** integrar de volta com o GitHub —
-comentar automaticamente no PR com a revisão, em vez de só ficar no
-`review-log.md`. Isso reverteria a decisão de "somente leitura" tomada em
-2026-08-24. Não implementar sem pedido explícito — escreveria em um lugar
-visível para outras pessoas no repositório, categoria de decisão diferente
-de tudo que foi construído até aqui.
+**Ideia futura, deliberadamente não implementada:** integrar de volta com
+o GitHub — comentar automaticamente no PR com a revisão, em vez de só
+ficar no `review-log.md`. Isso reverteria a decisão de "somente leitura"
+tomada em 2026-08-24. Escreveria em um lugar visível para outras pessoas
+no repositório, categoria de decisão diferente de tudo que foi construído
+até aqui — vale pensar melhor antes de fazer.

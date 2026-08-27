@@ -254,8 +254,7 @@ class WatcherState:
                 ],
                 # Card do feed some quando o item de backlog correspondente
                 # (mesmo id "projeto|arquivo|ts") foi resolvido/dispensado --
-                # pedido explicito do Arthur, pra nao ficar um achado tratado
-                # ainda poluindo o feed principal.
+                # senao um achado ja tratado fica poluindo o feed principal.
                 "feed": [
                     self._feed_card_for_output(c) for c in self.feed
                     if backlog_status.get(f"{c.get('project')}|{c.get('file')}|{c.get('ts')}", {})
