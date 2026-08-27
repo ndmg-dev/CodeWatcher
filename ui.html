@@ -4,17 +4,32 @@
 <meta charset="utf-8">
 <title>Code Watcher</title>
 <style>
+  /* Redesign de layout (2026-08-27) -- paleta oklch, fonte monoespacada
+     pra nomes de arquivo/commit, cards e controles com mais respiro.
+     Mesmos nomes de variavel de sempre, so os valores (e alguns tokens
+     derivados) mudaram. Sem Google Fonts de proposito: o app e local/
+     offline (roda sem internet, so o LLM configurado depende de rede) --
+     um <link> externo bloqueando o carregamento da pagina ja travou a
+     janela inteira num teste real (WebView2 preso esperando a fonte,
+     nunca disparava o "pywebviewready" que libera o show_window). Usa
+     as fontes monoespacadas/system-ui ja instaladas no Windows. */
   :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1e222b;
-    --border: #272c37;
-    --text: #e6e9ef;
-    --muted: #8b93a5;
-    --accent: #6ea8fe;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --err: #f87171;
+    --bg: oklch(0.16 0.005 260);
+    --panel: oklch(0.185 0.006 260);
+    --panel-2: oklch(0.22 0.007 260);
+    --surface: oklch(0.27 0.008 260);   /* preenchido: aba ativa, hover forte */
+    --border: oklch(0.28 0.008 260);
+    --text: oklch(0.93 0.005 260);
+    --muted: oklch(0.62 0.01 260);
+    --muted-2: oklch(0.55 0.01 260);    /* tom ainda mais discreto (labels finos) */
+    --accent: oklch(0.72 0.14 250);
+    --accent-bg: oklch(0.72 0.14 250 / 0.14);
+    --accent-border: oklch(0.72 0.14 250 / 0.45);
+    --ok: oklch(0.75 0.15 150);
+    --warn: oklch(0.78 0.14 80);
+    --err: oklch(0.68 0.18 25);
+    --chip: oklch(0.13 0.004 260);      /* fundo de badge/contador, mais escuro que panel */
+    --mono: Consolas, "Cascadia Mono", monospace;
   }
   * { box-sizing: border-box; }
 
@@ -30,67 +45,104 @@
 
   body {
     margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
-    display: grid; grid-template-columns: 290px 1fr; height: 100vh;
+    font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-columns: 300px 1fr; height: 100vh;
     overflow: hidden;
   }
 
   /* ---------- barra lateral ---------- */
   aside {
     background: var(--panel); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow-y: auto;
+    display: flex; flex-direction: column; overflow: hidden;
   }
-  .brand { padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
-  .brand h1 { margin: 0; font-size: 16px; letter-spacing: .3px; }
-  .brand .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .brand {
+    padding: 20px 20px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-icon {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: var(--accent-bg); border: 1px solid var(--accent-border);
+    display: flex; align-items: center; justify-content: center; color: var(--accent);
+  }
+  .brand-icon .icon { width: 16px; height: 16px; }
+  .brand-text { min-width: 0; }
+  .brand h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.2px; }
+  .brand .sub { color: var(--muted-2); font-size: 11px; margin-top: 1px; }
+  .brand-dot {
+    margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: var(--ok); box-shadow: 0 0 6px var(--ok);
+  }
+  .brand-dot.paused { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
 
   .section-title {
-    padding: 16px 18px 8px; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .8px; color: var(--muted);
+    padding: 16px 20px 6px; font-size: 10.5px; text-transform: uppercase;
+    font-weight: 700; letter-spacing: .9px; color: var(--muted-2);
+    display: flex; align-items: center; justify-content: space-between;
   }
+  .section-title .count { font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
 
+  .master-wrap { padding: 14px 16px 10px; flex: none; }
   .master {
-    margin: 0 14px 4px; padding: 10px 12px; border-radius: 8px;
+    padding: 11px 13px; border-radius: 9px;
     background: var(--panel-2); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
-    user-select: none;
+    user-select: none; cursor: pointer;
   }
-  .master { cursor: pointer; }
-  .master:hover { border-color: var(--accent); }
-  .master .label { flex: 1; }
-  .master .state { font-size: 12px; font-weight: 600; }
+  .master:hover { border-color: var(--accent-border); }
+  .master .left { display: flex; align-items: center; gap: 9px; }
+  .master .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .master .dot.on  { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .master .dot.off { background: var(--muted); box-shadow: none; }
+  .master .label { font-weight: 600; font-size: 12.5px; }
+  .master .state { font-size: 11px; font-weight: 700; letter-spacing: .3px; }
 
   .snooze-select {
-    margin: 0 14px 10px; width: calc(100% - 28px);
+    margin-top: 8px; width: 100%;
     background: var(--panel-2); border: 1px solid var(--border);
-    color: var(--muted); font-size: 12px; padding: 6px 8px;
-    border-radius: 6px; cursor: pointer;
+    color: var(--muted-2); font-size: 11.5px; padding: 8px 10px;
+    border-radius: 7px; cursor: pointer; font: inherit;
   }
-  .snooze-select:hover { border-color: var(--accent); }
+  .snooze-select:hover { border-color: var(--accent-border); }
 
+  .qa-grid {
+    padding: 4px 16px 12px; display: grid;
+    grid-template-columns: repeat(4, 1fr); gap: 6px; flex: none;
+  }
+  .qa-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    padding: 9px 4px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); cursor: pointer;
+    font: inherit;
+  }
+  .qa-btn:hover { border-color: var(--accent-border); color: var(--text); }
+  .qa-btn .icon { width: 15px; height: 15px; }
+  .qa-btn .qa-label { font-size: 9.5px; font-weight: 500; line-height: 1.1; text-align: center; }
+
+  #projects {
+    flex: 1; overflow-y: auto; padding: 2px 12px 8px; min-height: 0;
+    display: flex; flex-direction: column; gap: 3px;
+  }
   .proj {
-    margin: 0 14px 6px; padding: 10px 12px; border-radius: 8px;
-    background: var(--panel-2); border: 1px solid var(--border);
+    padding: 8px 11px; border-radius: 7px;
+    background: transparent; border: 1px solid transparent;
     display: flex; align-items: center; gap: 10px;
     cursor: pointer; user-select: none;
   }
-  .proj:hover { border-color: var(--accent); }
-  .proj .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .proj:hover { border-color: var(--border); background: var(--panel-2); }
+  .proj .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; cursor: pointer; }
   /* Sem glow no estado "on": e o estado default de quase toda a lista,
      nao precisa gritar -- so o "off" (excecao, pausado por escolha) e
      que vale destacar. */
   .proj .dot.on  { background: var(--ok); }
   .proj .dot.off { background: var(--muted); }
-  .proj .name { flex: 1; font-size: 13px; overflow: hidden;
+  .proj .name { flex: 1; font-size: 12.5px; overflow: hidden; cursor: pointer;
                 text-overflow: ellipsis; white-space: nowrap; }
   .proj .count {
-    font-size: 11px; color: var(--muted); background: #0d0f13;
-    padding: 2px 7px; border-radius: 10px; flex: none;
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted-2);
+    background: var(--chip); padding: 2px 7px; border-radius: 9px; flex: none;
   }
   .proj.paused .name { color: var(--muted); text-decoration: line-through; }
-  .proj.active { border-color: var(--accent); background: #1a2333; }
-  .proj .name { cursor: pointer; }
-  .proj .dot { cursor: pointer; }
+  .proj.active { border-color: var(--accent-border); background: var(--accent-bg); }
   .proj.missing .name { color: var(--err); }
   .proj .rm {
     flex: none; width: 18px; height: 18px; line-height: 16px; text-align: center;
@@ -98,7 +150,7 @@
     opacity: 0; transition: opacity .12s;
   }
   .proj:hover .rm { opacity: 1; }
-  .proj .rm:hover { background: #3a1f1f; color: var(--err); }
+  .proj .rm:hover { background: oklch(0.68 0.18 25 / 0.18); color: var(--err); }
 
   .icon {
     width: 14px; height: 14px; vertical-align: -2px;
@@ -106,69 +158,68 @@
     stroke-linecap: round; stroke-linejoin: round;
   }
 
-  .add-btn {
-    margin: 2px 14px 4px; padding: 9px 12px; border-radius: 8px;
-    background: transparent; border: 1px dashed var(--border);
-    color: var(--muted); font-size: 12px; text-align: center;
-    cursor: pointer; user-select: none;
-    display: flex; align-items: center; justify-content: center; gap: 7px;
+  .stats-grid {
+    border-top: 1px solid var(--border); padding: 12px 16px 16px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: none;
   }
-  .add-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-  .stat { display: flex; align-items: center; gap: 12px; }
-  .stat .icon-wrap {
-    width: 30px; height: 30px; border-radius: 7px; flex: none;
-    background: var(--panel); border: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: center;
-    color: var(--accent);
+  .stat-card {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 11px;
   }
-  .stat .icon-wrap .icon { width: 16px; height: 16px; }
-  .stat .body { flex: 1; min-width: 0; }
+  .stat-card .k { font-size: 10px; color: var(--muted-2); font-weight: 500; }
+  .stat-card .v { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  .stat-card small { display: block; font-size: 10px; color: var(--muted-2); margin-top: 1px; }
 
-  /* ---------- modal de varredura ---------- */
+  /* ---------- modais ---------- */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    position: fixed; inset: 0; background: oklch(0 0 0 / 0.6);
     display: flex; align-items: center; justify-content: center;
     z-index: 50;
   }
   .modal-overlay.hidden { display: none; }
   .modal {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 10px; width: 520px; max-width: 90vw;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; width: 520px; max-width: 90vw;
     max-height: 78vh; display: flex; flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    box-shadow: 0 24px 70px oklch(0 0 0 / 0.5);
   }
-  .modal h3 { margin: 0; padding: 16px 18px; font-size: 14px;
+  .modal h3 { margin: 0; padding: 18px 20px; font-size: 14.5px; font-weight: 700;
               border-bottom: 1px solid var(--border); }
-  .modal .hint { padding: 0 18px; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+  .modal .hint { padding: 0 20px; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+  .modal label { font-size: 12.5px; font-weight: 600; color: var(--muted-2); }
+  .modal select, .modal input, .modal textarea {
+    font: inherit; padding: 9px 10px; background: var(--panel);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; font-size: 13px;
+  }
   #scan-list { overflow-y: auto; padding: 6px 10px 10px; flex: 1; }
   .scan-item {
     display: flex; align-items: center; gap: 10px; padding: 9px 8px;
     border-radius: 6px; cursor: pointer;
   }
-  .scan-item:hover { background: var(--panel-2); }
-  .scan-item input { flex: none; accent-color: var(--accent); }
+  .scan-item:hover { background: var(--panel); }
+  .scan-item input { flex: none; accent-color: var(--accent); width: auto; padding: 0; }
   .scan-item .name { font-size: 13px; font-weight: 600; flex: none; }
   .scan-item .path {
     font-size: 11px; color: var(--muted); overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; flex: 1;
   }
   .scan-item .tag {
-    font-size: 10px; color: var(--muted); background: #0d0f13;
+    font-size: 10px; color: var(--muted); background: var(--chip);
     padding: 2px 7px; border-radius: 10px; flex: none;
   }
   .scan-item.already { opacity: .55; cursor: default; }
   .modal-actions {
-    display: flex; justify-content: flex-end; gap: 10px;
-    padding: 14px 18px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 9px;
+    padding: 16px 20px; border-top: 1px solid var(--border);
   }
   .modal-actions button {
-    font: inherit; font-size: 12.5px; padding: 8px 16px; border-radius: 7px;
-    border: 1px solid var(--border); background: var(--panel-2);
+    font: inherit; font-size: 12.5px; padding: 9px 17px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--panel);
     color: var(--text); cursor: pointer;
   }
   .modal-actions button:hover { border-color: var(--accent); }
-  .modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: #0f1115; font-weight: 600; }
+  .modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 700; }
   .modal-actions button.primary:hover { opacity: .9; }
   .modal-actions button:disabled { opacity: .4; cursor: default; }
 
@@ -189,147 +240,125 @@
     border-radius: 8px; padding: 10px 12px;
   }
   .stat .k { font-size: 11px; color: var(--muted); }
-  .stat .v { font-size: 19px; font-weight: 600; margin-top: 2px; }
-  .stat .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
-  #s-today-cost, #s-total-cost { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
-
-  .spark { display: block; margin-top: 6px; overflow: visible; }
-  .spark-line {
-    fill: none; stroke: var(--muted); stroke-width: 1.5;
-    stroke-linecap: round; stroke-linejoin: round;
-    stroke-dasharray: 1; stroke-dashoffset: 1;
-    animation: spark-draw .9s ease-out forwards;
-  }
-  @keyframes spark-draw { to { stroke-dashoffset: 0; } }
-  .spark-dot {
-    fill: var(--accent);
-    animation: spark-pulse 2.2s ease-in-out infinite;
-  }
-  @keyframes spark-pulse {
-    0%, 100% { r: 2.2; opacity: 1; }
-    50% { r: 3.2; opacity: .55; }
-  }
-
   /* ---------- feed ---------- */
-  main { display: flex; flex-direction: column; overflow: hidden; }
+  main { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
   header {
-    padding: 14px 22px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 12px; background: var(--panel);
+    padding: 14px 26px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; background: var(--panel);
+    flex-wrap: wrap;
   }
-  header h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1;
-              display: flex; align-items: center; gap: 8px; }
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 500; color: var(--accent);
-    background: #1a2333; border: 1px solid var(--accent);
-    padding: 3px 6px 3px 10px; border-radius: 20px; cursor: pointer;
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    background: var(--accent-bg); border: 1px solid var(--accent-border);
+    padding: 5px 8px 5px 11px; border-radius: 20px; cursor: pointer;
   }
-  .filter-chip:hover { background: #22314a; }
+  .filter-chip:hover { background: oklch(0.72 0.14 250 / 0.22); }
   .filter-chip.inactive {
     color: var(--muted); background: transparent; border-color: var(--border);
+    font-weight: 600;
   }
-  .filter-chip.inactive:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+  .filter-chip.inactive:hover { border-color: var(--accent-border); color: var(--text); background: transparent; }
   .hidden { display: none !important; }
-  /* Abas com indicador de sublinhado, nao pilula preenchida -- assim nao
-     competem de forma visual com os chips/pills de filtro e status ao
-     lado (mesma linha, gramaticas diferentes de proposito: aba = navegacao
-     entre views, pilula = filtro/estado). Divisor sutil separa os dois
-     grupos. */
+  /* Segmented control: as abas Feed/Backlog vivem num container proprio
+     (fundo + borda), aba ativa ganha um preenchimento solido -- gramatica
+     visual clara e distinta dos chips de filtro/status ao lado. */
   .tabs {
-    display: flex; gap: 4px; padding-right: 14px; margin-right: 2px;
-    border-right: 1px solid var(--border); align-self: stretch;
-    align-items: center;
+    display: flex; gap: 3px; background: var(--panel-2); border: 1px solid var(--border);
+    padding: 3px; border-radius: 9px;
   }
   .tab {
-    font-size: 13px; font-weight: 600; color: var(--muted);
-    padding: 6px 4px; cursor: pointer;
-    border-bottom: 2px solid transparent;
+    font-size: 12.5px; font-weight: 600; color: var(--muted);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; user-select: none;
   }
   .tab:hover { color: var(--text); }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab.active { color: var(--text); background: var(--surface); }
   .tab-badge {
-    display: inline-block; min-width: 16px; text-align: center;
-    font-size: 10px; font-weight: 700; color: var(--err);
-    background: #3a1f1f; border-radius: 10px; padding: 1px 5px;
-    margin-left: 5px;
+    display: inline-block; min-width: 15px; text-align: center;
+    font-size: 9.5px; font-weight: 700; color: var(--err);
+    background: oklch(0.68 0.18 25 / 0.18); border-radius: 9px; padding: 1px 5px;
+    margin-left: 6px;
   }
   .tab-badge:empty { display: none; }
-  .backlog-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .backlog-actions { margin-top: 11px; display: flex; gap: 8px; }
   .backlog-actions button {
-    font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
-    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+    font-size: 11.5px; font-weight: 500; padding: 6px 13px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-family: inherit;
   }
   .backlog-actions button.resolve:hover { border-color: var(--ok); color: var(--ok); }
   .backlog-actions button.dismiss:hover { border-color: var(--err); color: var(--err); }
   .backlog-actions button.reopen:hover  { border-color: var(--accent); color: var(--accent); }
   .backlog-status {
-    font-size: 11px; color: var(--muted); margin-top: 6px;
+    font-size: 11.5px; color: var(--ok); font-weight: 500; margin-top: 9px;
   }
+  .backlog-status.dismissed { color: var(--err); }
+  .backlog-status .reopen { color: var(--muted); border-color: var(--border); }
   .pill {
-    font-size: 11px; padding: 4px 10px; border-radius: 20px;
-    border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; font-weight: 600; padding: 6px 13px; border-radius: 20px;
+    border: 1px solid var(--border); color: var(--muted); margin-left: auto;
   }
-  .pill.live { color: var(--ok); border-color: #1f4030; }
-  .pill.busy { color: var(--warn); border-color: #4a3a12; }
-  .pill.dead { color: var(--err); border-color: #4a1f1f; }
+  .pill.live { color: var(--ok); border-color: oklch(0.75 0.15 150 / 0.35); background: oklch(0.75 0.15 150 / 0.1); }
+  .pill.busy { color: var(--warn); border-color: oklch(0.78 0.14 80 / 0.35); background: oklch(0.78 0.14 80 / 0.1); }
+  .pill.dead { color: var(--err); border-color: oklch(0.68 0.18 25 / 0.35); background: oklch(0.68 0.18 25 / 0.1); }
 
   #search-box {
     background: var(--panel-2); border: 1px solid var(--border);
-    color: var(--text); font-size: 12px; padding: 6px 10px;
-    border-radius: 20px; width: 200px; outline: none;
+    color: var(--text); font-size: 12px; padding: 8px 13px;
+    border-radius: 20px; width: 210px; outline: none; font: inherit;
   }
-  #search-box:focus { border-color: var(--accent); }
+  #search-box:focus { border-color: var(--accent-border); }
   #search-box::placeholder { color: var(--muted); }
 
-  #feed { flex: 1; overflow-y: auto; padding: 16px 22px 40px; }
+  #feed { flex: 1; overflow-y: auto; padding: 18px 26px 40px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--border);
+    background: oklch(0.195 0.006 260); border: 1px solid var(--border);
     border-left: 3px solid var(--accent);
-    border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+    border-radius: 10px; padding: 15px 17px; margin-bottom: 11px;
   }
   .card.running { border-left-color: var(--warn); }
   .card.failed  { border-left-color: var(--err); }
-  .card.secret  { border-left-color: var(--err); background: #2a1717; }
-  .card.resolved { opacity: .55; border-left-color: var(--muted); }
+  .card.secret  { border-left-color: var(--err); background: oklch(0.22 0.05 25 / 0.4); }
+  .card.resolved { opacity: .55; border-left-color: var(--ok); }
+  .card.dismissed { opacity: .55; border-left-color: var(--err); }
   .secret-list { list-style: none; padding: 0; margin: 6px 0 0; }
   .secret-list li {
     font-size: 12px; padding: 5px 8px; margin-bottom: 4px;
     background: var(--panel-2); border-radius: 5px;
   }
   .secret-list .kind { color: var(--err); font-weight: 600; margin-right: 6px; }
-  .secret-list code { font-size: 11px; color: var(--muted); }
+  .secret-list code { font-size: 11px; color: var(--muted); font-family: var(--mono); }
   .severity-badge {
-    display: inline-block; font-size: 10px; font-weight: 600;
-    padding: 2px 8px; border-radius: 10px; margin-left: 6px;
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 9px; border-radius: 10px; margin-left: 6px;
     text-transform: uppercase; letter-spacing: .3px;
   }
-  .severity-badge.alta  { color: var(--err); background: #3a1f1f; }
-  .severity-badge.media { color: var(--warn); background: #3a2f10; }
+  .severity-badge.alta  { color: var(--err); background: oklch(0.68 0.18 25 / 0.18); }
+  .severity-badge.media { color: var(--warn); background: oklch(0.78 0.14 80 / 0.18); }
   .severity-badge.baixa { color: var(--muted); background: var(--panel-2); }
   .retry-btn {
     background: none; border: 1px solid var(--err); color: var(--err);
     font-size: 11px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
-    margin-left: 6px;
+    margin-left: 6px; font-family: inherit;
   }
-  .retry-btn:hover { background: var(--err); color: #171a21; }
+  .retry-btn:hover { background: var(--err); color: var(--bg); }
   .card .head {
-    display: flex; align-items: baseline; gap: 10px;
-    flex-wrap: wrap; margin-bottom: 4px;
+    display: flex; align-items: baseline; gap: 9px;
+    flex-wrap: wrap; margin-bottom: 6px;
   }
-  .card .file { font-weight: 600; font-size: 13px; }
+  .card .file { font-weight: 600; font-size: 13.5px; font-family: var(--mono); }
   .card .proj-tag {
     font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
-    background: #0d0f13; color: var(--accent);
-    padding: 2px 7px; border-radius: 4px;
+    background: var(--chip); color: var(--accent); font-weight: 600;
+    padding: 3px 8px; border-radius: 5px;
   }
   .card .source-tag {
     font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
-    background: #1a1030; color: #c4a4ff;
-    padding: 2px 7px; border-radius: 4px;
+    background: oklch(0.24 0.08 300); color: oklch(0.78 0.1 300); font-weight: 600;
+    padding: 3px 8px; border-radius: 5px;
   }
-  .card .time { font-size: 11px; color: var(--muted); margin-left: auto; }
-  .card .body { margin-top: 10px; font-size: 13px; color: #cfd4de; }
+  .card .time { font-size: 11px; color: var(--muted-2); margin-left: auto; }
+  .card .body { margin-top: 10px; font-size: 13px; line-height: 1.6; color: oklch(0.82 0.006 260); }
   .card .body h1, .card .body h2, .card .body h3 {
     font-size: 13px; margin: 12px 0 6px; color: var(--text);
   }
@@ -337,19 +366,19 @@
   .card .body ul, .card .body ol { margin: 7px 0; padding-left: 20px; }
   .card .body li { margin: 3px 0; }
   .card .body code {
-    background: #0d0f13; padding: 1px 5px; border-radius: 4px;
-    font-family: Consolas, monospace; font-size: 12px; color: #a5d6ff;
+    background: var(--chip); padding: 1px 5px; border-radius: 4px;
+    font-family: var(--mono); font-size: 12px; color: oklch(0.78 0.09 240);
   }
   .card .body pre {
-    background: #0d0f13; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--chip); border: 1px solid var(--border); border-radius: 6px;
     padding: 10px 12px; overflow-x: auto; margin: 8px 0;
   }
   .card .body pre code { background: none; padding: 0; }
 
-  .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+  .empty { color: var(--muted-2); text-align: center; padding: 70px 20px; font-size: 13px; }
   .spinner {
     display: inline-block; width: 11px; height: 11px; border-radius: 50%;
-    border: 2px solid #4a3a12; border-top-color: var(--warn);
+    border: 2px solid oklch(0.78 0.14 80 / 0.25); border-top-color: var(--warn);
     animation: spin .8s linear infinite; vertical-align: -1px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -359,97 +388,84 @@
 
 <aside>
   <div class="brand">
-    <h1>Code Watcher</h1>
-    <div class="sub" id="uptime">iniciando...</div>
+    <div class="brand-icon">
+      <svg class="icon" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </div>
+    <div class="brand-text">
+      <h1>Code Watcher</h1>
+      <div class="sub" id="uptime">iniciando...</div>
+    </div>
+    <span class="brand-dot" id="brand-dot"></span>
   </div>
 
-  <div class="section-title">Monitoramento</div>
-  <div class="master" id="master" onclick="toggleMaster()">
-    <span class="label">Monitoramento geral</span>
-    <span class="state" id="master-state">—</span>
+  <div class="master-wrap">
+    <div class="master" id="master" onclick="toggleMaster()">
+      <div class="left">
+        <span class="dot" id="master-dot"></span>
+        <span class="label">Monitoramento geral</span>
+      </div>
+      <span class="state" id="master-state">—</span>
+    </div>
+    <select class="snooze-select" id="snooze-select" onchange="onSnoozeChange(this.value)">
+      <option value="">Soneca (pausar por um tempo)...</option>
+      <option value="30">Pausar por 30 minutos</option>
+      <option value="60">Pausar por 1 hora</option>
+      <option value="120">Pausar por 2 horas</option>
+      <option value="240">Pausar por 4 horas</option>
+    </select>
   </div>
-  <select class="snooze-select" id="snooze-select" onchange="onSnoozeChange(this.value)">
-    <option value="">Soneca (pausar por um tempo)...</option>
-    <option value="30">Pausar por 30 minutos</option>
-    <option value="60">Pausar por 1 hora</option>
-    <option value="120">Pausar por 2 horas</option>
-    <option value="240">Pausar por 4 horas</option>
-  </select>
 
-  <div class="section-title">Pastas monitoradas</div>
+  <div class="qa-grid">
+    <button class="qa-btn" onclick="addProject()" title="Adicionar pasta">
+      <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span class="qa-label">Pasta</span>
+    </button>
+    <button class="qa-btn" onclick="scanRepos()" title="Buscar repositórios">
+      <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <span class="qa-label">Buscar</span>
+    </button>
+    <button class="qa-btn" onclick="openAskModal()" title="Perguntar ao histórico">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4 2.83c-.68.24-1 .9-1 1.67v.5"/><line x1="12" y1="17" x2="12.01" y2="17"/><circle cx="12" cy="12" r="10"/></svg>
+      <span class="qa-label">Perguntar</span>
+    </button>
+    <button class="qa-btn" onclick="openSummaryModal()" title="Resumo diário">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span class="qa-label">Resumo</span>
+    </button>
+    <button class="qa-btn" onclick="openSettings()" title="Configurações">
+      <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="qa-label">Config</span>
+    </button>
+  </div>
+
+  <div class="section-title">
+    <span>Pastas monitoradas</span>
+    <span class="count" id="project-count"></span>
+  </div>
   <div id="projects"></div>
-  <div class="add-btn" onclick="addProject()">
-    <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    Adicionar pasta
-  </div>
-  <div class="add-btn" onclick="scanRepos()">
-    <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    Buscar repositórios
-  </div>
-  <div class="add-btn" onclick="openAskModal()">
-    <svg class="icon" viewBox="0 0 24 24"><path d="M9 9a3 3 0 1 1 4 2.83c-.68.24-1 .9-1 1.67v.5"/><line x1="12" y1="17" x2="12.01" y2="17"/><circle cx="12" cy="12" r="10"/></svg>
-    Perguntar ao histórico
-  </div>
-  <div class="add-btn" onclick="openSummaryModal()">
-    <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-    Resumo diário
-  </div>
-  <div class="add-btn" onclick="openSettings()">
-    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    Configurações
-  </div>
 
-  <div class="section-title">Estatísticas</div>
-  <div class="stats">
-    <div class="stat">
-      <div class="icon-wrap">
-        <svg class="icon" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      </div>
-      <div class="body">
-        <div class="k">Revisões nesta sessão</div>
-        <div class="v" id="s-session">0</div>
-      </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="k">Sessão</div>
+      <div class="v" id="s-session">0</div>
     </div>
-    <div class="stat">
-      <div class="icon-wrap">
-        <svg class="icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-      </div>
-      <div class="body">
-        <div class="k">Total histórico</div>
-        <div class="v" id="s-total">0</div>
-        <small id="s-total-cost"></small>
-        <div id="spark-total"></div>
-      </div>
+    <div class="stat-card">
+      <div class="k">Total histórico</div>
+      <div class="v" id="s-total">0</div>
+      <small id="s-total-cost"></small>
     </div>
-    <div class="stat">
-      <div class="icon-wrap">
-        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      </div>
-      <div class="body">
-        <div class="k">Tempo em revisão</div>
-        <div class="v" id="s-time">0s</div>
-        <div id="spark-time"></div>
-      </div>
+    <div class="stat-card">
+      <div class="k">Tempo revisão</div>
+      <div class="v" id="s-time">0s</div>
     </div>
-    <div class="stat">
-      <div class="icon-wrap">
-        <svg class="icon" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      </div>
-      <div class="body">
-        <div class="k">Revisões nesta hora</div>
-        <div class="v" id="s-rate">0/0</div>
-        <div id="spark-rate"></div>
-      </div>
+    <div class="stat-card">
+      <div class="k">Hoje</div>
+      <div class="v"><span id="s-today">0 (0 críticos)</span></div>
+      <small id="s-today-cost"></small>
     </div>
-    <div class="stat">
-      <div class="icon-wrap">
-        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      </div>
-      <div class="body">
-        <div class="k">Resumo de hoje</div>
-        <div class="v"><span id="s-today">0 (0 críticos)</span></div>
-        <small id="s-today-cost"></small>
-      </div>
+    <div class="stat-card">
+      <div class="k">Revisões nesta hora</div>
+      <div class="v" id="s-rate">0/0</div>
     </div>
   </div>
 </aside>
@@ -495,30 +511,30 @@
 </div>
 
 <div id="settings-modal" class="modal-overlay hidden">
-  <div class="modal" style="width: 400px">
+  <div class="modal" style="width: 420px">
     <h3>Configurações</h3>
-    <div style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
-      <label style="font-size: 13px; font-weight: 600;">Provedor de LLM</label>
-      <select id="set-provider" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+      <label>Provedor de LLM</label>
+      <select id="set-provider">
         <option value="openai">OpenAI API</option>
         <option value="claude">Claude CLI</option>
       </select>
 
-      <label style="font-size: 13px; font-weight: 600;">OpenAI API Key</label>
-      <input type="password" id="set-api-key" placeholder="sk-..." style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
-      
-      <label style="font-size: 13px; font-weight: 600;">Modelo OpenAI</label>
-      <select id="set-model" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+      <label>OpenAI API Key</label>
+      <input type="password" id="set-api-key" placeholder="sk-...">
+
+      <label>Modelo OpenAI</label>
+      <select id="set-model">
         <option value="gpt-4o-mini">gpt-4o-mini (Rápido e barato)</option>
         <option value="gpt-4o">gpt-4o (Mais inteligência)</option>
         <option value="o3-mini">o3-mini (Alta complexidade)</option>
       </select>
 
-      <label style="font-size: 13px; font-weight: 600;">Limite de revisões por hora</label>
-      <input type="number" id="set-max-reviews" min="1" max="500" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+      <label>Limite de revisões por hora</label>
+      <input type="number" id="set-max-reviews" min="1" max="500">
 
-      <label style="font-size: 13px; font-weight: 600;">Notificar na bandeja quando</label>
-      <select id="set-notify-severity" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+      <label>Notificar na bandeja quando</label>
+      <select id="set-notify-severity">
         <option value="alta">Só achados críticos (severidade alta)</option>
         <option value="media">Críticos e médios</option>
         <option value="nunca">Nunca notificar</option>
@@ -534,13 +550,13 @@
 <div id="ask-modal" class="modal-overlay hidden">
   <div class="modal" style="width: 560px">
     <h3>Perguntar ao histórico</h3>
-    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
-      <label style="font-size: 13px; font-weight: 600;">Projeto</label>
-      <select id="ask-project" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;"></select>
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+      <label>Projeto</label>
+      <select id="ask-project"></select>
 
-      <label style="font-size: 13px; font-weight: 600;">Pergunta</label>
+      <label>Pergunta</label>
       <textarea id="ask-question" rows="3" placeholder="Ex: quais problemas de segurança já foram flagados esse mês?"
-                style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px; font: inherit; resize: vertical;"></textarea>
+                style="resize: vertical;"></textarea>
 
       <div id="ask-answer" style="font-size: 13px; line-height: 1.5; max-height: 320px; overflow-y: auto; display: none;"></div>
     </div>
@@ -555,7 +571,7 @@
 <div id="patterns-modal" class="modal-overlay hidden">
   <div class="modal" style="width: 560px">
     <h3>Padrões repetidos entre projetos</h3>
-    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
       <div style="font-size: 12px; color: var(--muted);">
         Analisa os itens pendentes do backlog de todos os projetos e aponta achados que se repetem em mais de um.
       </div>
@@ -572,9 +588,9 @@
 <div id="summary-modal" class="modal-overlay hidden">
   <div class="modal" style="width: 560px">
     <h3>Resumo diário / standup</h3>
-    <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px;">
-      <label style="font-size: 13px; font-weight: 600;">Período</label>
-      <select id="summary-period" style="padding: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 13px;">
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+      <label>Período</label>
+      <select id="summary-period">
         <option value="today">Hoje</option>
         <option value="yesterday">Ontem (o que eu fiz ontem)</option>
         <option value="week">Últimos 7 dias</option>
@@ -765,6 +781,9 @@ function render(state) {
   document.getElementById("master-state").textContent = masterLabel;
   document.getElementById("master-state").style.color =
     state.paused ? "var(--muted)" : "var(--ok)";
+  document.getElementById("master-dot").className = "dot " + (state.paused ? "off" : "on");
+  document.getElementById("brand-dot").classList.toggle("paused", !!state.paused);
+  document.getElementById("project-count").textContent = state.projects.length;
 
   /* pastas */
   const projHtml = state.projects.map(p => {
@@ -833,7 +852,7 @@ function render(state) {
   }
 
   const key = "feed|" + activeProjectFilter + "|" + searchQuery + "|" + onlyCritical + "|"
-    + JSON.stringify(visibleFeed.map(c => [c.id, c.status]));
+    + JSON.stringify(visibleFeed.map(c => [c.id, c.status, c.resolution]));
   if (key === lastRenderKey) return;
   lastRenderKey = key;
 
@@ -874,7 +893,16 @@ function render(state) {
     const severityBadge = (c.status === "done" && c.severity && c.severity !== "baixa")
       ? `<span class="severity-badge ${esc(c.severity)}">${esc(severityLabels[c.severity] || c.severity)}</span>`
       : "";
-    return `<div class="card ${c.status}">
+    // Resolucao vem do backlog (mesmo item, mesmo id) -- o card do feed
+    // nao some quando resolvido/dispensado la, so fica marcado, pra manter
+    // os dois lugares consistentes sem esconder historico do feed.
+    const resolutionClass = c.resolution === "done" ? " resolved" : c.resolution === "dismissed" ? " dismissed" : "";
+    const resolutionNote = c.resolution === "done"
+      ? `<div class="backlog-status">${ICON_CHECK} Resolvido no backlog</div>`
+      : c.resolution === "dismissed"
+      ? `<div class="backlog-status dismissed">${ICON_X} Dispensado no backlog</div>`
+      : "";
+    return `<div class="card ${c.status}${resolutionClass}">
               <div class="head">
                 <span class="proj-tag">${c.project}</span>
                 ${c.source === "commit" ? '<span class="source-tag">commit</span>' : ""}
@@ -885,6 +913,7 @@ function render(state) {
                   c.duration ? " &middot; " + c.duration + "s" : ""}</span>
               </div>
               ${body}
+              ${resolutionNote}
             </div>`;
   }).join("");
   if (atTop) feed.scrollTop = 0;
@@ -929,10 +958,11 @@ function renderBacklog(state) {
            <button class="resolve" onclick="resolveBacklogItem('${esc(i.id)}')">${ICON_CHECK} Resolvido</button>
            <button class="dismiss" onclick="dismissBacklogItem('${esc(i.id)}')">${ICON_X} Dispensar</button>
          </div>`
-      : `<div class="backlog-status">${i.status === "done" ? ICON_CHECK + " Resolvido" : ICON_X + " Dispensado"} em ${fmtTime(i.resolved_at)}
+      : `<div class="backlog-status${i.status === "dismissed" ? " dismissed" : ""}">${i.status === "done" ? ICON_CHECK + " Resolvido" : ICON_X + " Dispensado"} em ${fmtTime(i.resolved_at)}
            <button class="reopen" onclick="reopenBacklogItem('${esc(i.id)}')">${ICON_UNDO} Reabrir</button>
          </div>`;
-    return `<div class="card ${i.kind === "secret" ? "secret" : i.status !== "open" ? "resolved" : ""}">
+    const statusClass = i.kind === "secret" ? "secret" : i.status === "done" ? "resolved" : i.status === "dismissed" ? "dismissed" : "";
+    return `<div class="card ${statusClass}">
               <div class="head">
                 <span class="proj-tag">${i.project}</span>
                 ${i.source === "commit" ? '<span class="source-tag">commit</span>' : ""}

@@ -252,13 +252,17 @@ class WatcherState:
                      "count": self.per_project.get(p["name"], 0)}
                     for p in projects
                 ],
-                # Card do feed some quando o item de backlog correspondente
-                # (mesmo id "projeto|arquivo|ts") foi resolvido/dispensado --
-                # senao um achado ja tratado fica poluindo o feed principal.
+                # Card do feed carrega a mesma resolucao do item de backlog
+                # correspondente (mesmo id "projeto|arquivo|ts") -- nao some
+                # do feed, so marca visualmente como resolvido/dispensado,
+                # pra manter os dois lugares consistentes sem esconder
+                # historico do feed principal.
                 "feed": [
-                    self._feed_card_for_output(c) for c in self.feed
-                    if backlog_status.get(f"{c.get('project')}|{c.get('file')}|{c.get('ts')}", {})
-                       .get("status") not in ("done", "dismissed")
+                    dict(self._feed_card_for_output(c),
+                         resolution=backlog_status.get(
+                             f"{c.get('project')}|{c.get('file')}|{c.get('ts')}", {}
+                         ).get("status", "open"))
+                    for c in self.feed
                 ],
                 "backlog": [
                     dict(item, status=backlog_status.get(item["id"], {}).get("status", "open"),
