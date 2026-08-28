@@ -293,11 +293,19 @@
     content: ""; position: absolute; left: 0; top: 0; height: 3px; width: 100%;
     background: var(--chan, var(--accent));
   }
+  .card-top { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.95rem; }
+  .card-ic {
+    width: 2rem; height: 2rem; flex: none; display: grid; place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--chan, var(--accent)) 15%, transparent);
+    color: var(--chan, var(--accent));
+  }
+  .card-ic svg { width: 1rem; height: 1rem; }
   .card .tag {
     font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--chan, var(--accent)); font-weight: 600;
   }
-  .card h3 { font-size: 1.2rem; margin: 0.55rem 0 0.55rem; }
+  .card h3 { font-size: 1.2rem; margin: 0 0 0.55rem; }
   .card p { color: var(--text-dim); font-size: 0.96rem; }
   .card p code, .prose code {
     font-family: var(--font-mono); font-size: 0.85em;
@@ -474,22 +482,34 @@
     </div>
     <div class="features reveal">
       <article class="card" style="--chan: var(--accent);">
-        <span class="tag">Feed</span>
+        <div class="card-top">
+          <span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+          <span class="tag">Feed</span>
+        </div>
         <h3>Revisões em tempo real</h3>
         <p>Mais recentes no topo, com etiqueta de origem (commit / PR) e severidade. Filtra por projeto, busca no texto, isola só as críticas.</p>
       </article>
       <article class="card" style="--chan: var(--crit);">
-        <span class="tag">Backlog</span>
+        <div class="card-top">
+          <span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+          <span class="tag">Backlog</span>
+        </div>
         <h3>Achados que viram tarefa</h3>
         <p>Todo achado de severidade alta ou média entra numa fila acionável: resolver, dispensar ou reabrir &mdash; e o estado persiste entre reinícios.</p>
       </article>
       <article class="card" style="--chan: var(--info);">
-        <span class="tag">Análise</span>
+        <div class="card-top">
+          <span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M18 20V4M6 20v-3"/></svg></span>
+          <span class="tag">Análise</span>
+        </div>
         <h3>Tendências ao longo do tempo</h3>
         <p>Severidade por dia, arquivos que mais voltam pra revisão, custo de LLM e volume por projeto, origem das alterações.</p>
       </article>
       <article class="card" style="--chan: var(--gold);">
-        <span class="tag">Mapa 3D</span>
+        <div class="card-top">
+          <span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/></svg></span>
+          <span class="tag">Mapa 3D</span>
+        </div>
         <h3>A cidade dos seus repos</h3>
         <p>Estilo <em>Git City</em>: cada projeto é um distrito, cada arquivo é um prédio, cada commit é um bloco empilhado. Prédio com achado crítico acende em vermelho.</p>
       </article>
