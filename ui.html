@@ -3,6 +3,19 @@
 <head>
 <meta charset="utf-8">
 <title>Code Watcher</title>
+<!-- Import map do three.js (mesma versao pinada usada nas cenas 3D do produto).
+     O modulo so e baixado sob demanda (import() dinamico) na primeira vez que a
+     aba "Mapa 3D" e aberta -- nunca bloqueia o carregamento da pagina nem o
+     "pywebviewready", ao contrario de um recurso externo carregado de forma
+     sincrona no head. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js"
+  }
+}
+</script>
 <style>
   /* Redesign de layout (2026-08-27) -- paleta oklch, fonte monoespacada
      pra nomes de arquivo/commit, cards e controles com mais respiro.
@@ -61,8 +74,8 @@
   }
   .brand-icon {
     width: 30px; height: 30px; border-radius: 8px; flex: none;
-    background: var(--accent-bg); border: 1px solid var(--accent-border);
-    display: flex; align-items: center; justify-content: center; color: var(--accent);
+    background: oklch(0.75 0.15 150 / 0.14); border: 1px solid oklch(0.75 0.15 150 / 0.45);
+    display: flex; align-items: center; justify-content: center; color: var(--ok);
   }
   .brand-icon .icon { width: 16px; height: 16px; }
   .brand-text { min-width: 0; }
@@ -382,6 +395,163 @@
     animation: spin .8s linear infinite; vertical-align: -1px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Análise ---------- */
+  #analytics-view {
+    flex: 1; overflow-y: auto; padding: 18px 26px 40px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  #analytics-view.hidden { display: none !important; }
+  .an-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .an-stat {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .an-stat-top { display: flex; align-items: center; gap: 7px; }
+  .an-stat-ic {
+    width: 24px; height: 24px; border-radius: 6px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-bg); color: var(--accent);
+  }
+  .an-stat-ic .icon { width: 13px; height: 13px; }
+  .an-stat-ic.warn { background: oklch(0.68 0.18 25 / 0.16); color: var(--err); }
+  .an-stat-ic.ok   { background: oklch(0.75 0.15 150 / 0.16); color: var(--ok); }
+  .an-stat .k { font-size: 10.5px; color: var(--muted-2); font-weight: 600; }
+  .an-stat .v { font-size: 20px; font-weight: 700; margin-top: 7px; }
+  .an-stat .v.warn { color: var(--err); }
+  .an-stat .d {
+    font-size: 10.5px; color: var(--muted-2); line-height: 1.45; margin-top: 5px;
+  }
+  .an-hint {
+    font-size: 11px; color: var(--muted-2); line-height: 1.45;
+    margin: -6px 0 12px;
+  }
+  .an-card {
+    background: oklch(0.195 0.006 260); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .an-h {
+    font-size: 12px; font-weight: 700; color: var(--text);
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px;
+  }
+  .an-sub { font-size: 10.5px; font-weight: 500; color: var(--muted-2); }
+  .an-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .an-grid, .an-stats { grid-template-columns: 1fr 1fr; } }
+  .an-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 10.5px; color: var(--muted); }
+  .an-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  #an-sevchart svg { display: block; width: 100%; }
+  .an-xaxis { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--muted-2); margin-top: 4px; font-family: var(--mono); }
+
+  .an-hs-row { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; font-size: 12px; }
+  .an-hs-file {
+    flex: none; width: 130px; font-family: var(--mono); font-size: 11.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .an-hs-bar { flex: 1; height: 12px; background: var(--chip); border-radius: 3px; position: relative; overflow: hidden; }
+  .an-hs-fill { position: absolute; left: 0; top: 0; height: 100%; background: var(--accent); }
+  .an-hs-fill.alta { background: var(--err); }
+  .an-hs-n { flex: none; width: 54px; text-align: right; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .an-hs-n .warn { color: var(--err); font-weight: 700; }
+
+  .an-proj-row {
+    display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px;
+    align-items: center; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px;
+  }
+  .an-proj-row:first-child { border-top: none; }
+  .an-proj-row .pname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .an-proj-row .pnum { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .an-proj-row .pnum.alta { color: var(--err); }
+  .an-proj-row .pnum.media { color: var(--warn); }
+
+  .an-source { display: flex; gap: 8px; }
+  .an-source .src {
+    flex: 1; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .an-source .src .k { font-size: 10.5px; color: var(--muted-2); }
+  .an-source .src .v { font-size: 17px; font-weight: 700; margin-top: 2px; }
+
+  /* ---------- Mapa 3D ---------- */
+  #map-view { flex: 1; position: relative; overflow: hidden; }
+  #map-view.hidden { display: none !important; }
+  #map-canvas { position: absolute; inset: 0; }
+  #map-canvas canvas { display: block; }
+
+  #map-tooltip {
+    position: absolute; z-index: 7; pointer-events: none;
+    max-width: 300px; padding: 7px 10px; border-radius: 6px;
+    background: rgba(8, 11, 18, 0.95); border: 1px solid rgba(232, 199, 122, 0.35);
+    color: var(--text); font-size: 11.5px; line-height: 1.5;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+  }
+  #map-tooltip .t-file { font-family: var(--mono); color: var(--text); word-break: break-all; }
+  #map-tooltip .t-type {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+    color: #e8c77a;
+  }
+  #map-tooltip .t-sev {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+    padding: 1px 5px; border-radius: 8px;
+  }
+  #map-tooltip .t-sev-alta  { color: var(--err);  background: oklch(0.68 0.18 25 / 0.2); }
+  #map-tooltip .t-sev-media { color: var(--warn); background: oklch(0.78 0.14 80 / 0.2); }
+  #map-tooltip .t-sev-baixa { color: var(--muted); background: var(--panel-2); }
+  #map-tooltip .t-msg { color: oklch(0.78 0.006 260); }
+
+  #map-empty {
+    position: absolute; inset: 0; z-index: 6; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted-2); font-size: 13px; text-align: center; padding: 40px;
+  }
+
+  #map-detail {
+    position: absolute; top: 14px; right: 14px; width: 250px; z-index: 5;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+    box-shadow: 0 12px 40px oklch(0 0 0 / 0.4);
+  }
+  #map-detail .md-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  #map-detail .md-close { cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
+  #map-detail .md-close:hover { color: var(--text); }
+  #map-detail .md-file { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-top: 8px; word-break: break-all; }
+  #map-detail .md-meta { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: oklch(0.78 0.1 300); font-weight: 700; margin-top: 8px; }
+  #map-detail .md-label { font-size: 12px; color: oklch(0.82 0.006 260); margin-top: 6px; line-height: 1.5; }
+  #map-detail .md-sev { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+  #map-detail .md-go {
+    margin-top: 12px; width: 100%; font: inherit; font-size: 11.5px; font-weight: 600;
+    padding: 8px 0; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent-bg); color: var(--accent);
+  }
+  #map-detail .md-go:hover { background: oklch(0.72 0.14 250 / 0.22); }
+
+  /* Barra inferior — tema preto/dourado (distinto do azul/roxo do app) */
+  #map-bar {
+    position: absolute; bottom: 14px; left: 14px; right: 14px; z-index: 5;
+    background: rgba(8, 11, 18, 0.92);
+    border: 1px solid rgba(232, 199, 122, 0.35); border-radius: 6px; padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #map-bar .row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #map-bar .grp { display: flex; align-items: center; gap: 8px; }
+  #map-bar .lbl {
+    font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    color: #8a93a6; white-space: nowrap; font-family: var(--mono);
+  }
+  #map-bar .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  #map-bar .map-divider { width: 1px; align-self: stretch; background: rgba(232, 199, 122, 0.25); }
+  #map-bar .tl { display: flex; align-items: center; gap: 12px; }
+  #map-timelapse { flex: 1; accent-color: #e8c77a; }
+  #map-tl-label { font-size: 10.5px; font-family: var(--mono); color: #e8c77a; white-space: nowrap; }
+  .map-chip {
+    cursor: pointer; user-select: none; font-size: 10.5px; font-weight: 700;
+    padding: 5px 10px; border-radius: 4px; font-family: var(--mono);
+    color: #c7ccd6; background: rgba(20, 25, 38, 0.8); border: 1px solid rgba(232, 199, 122, 0.3);
+  }
+  .map-chip:hover { border-color: rgba(232, 199, 122, 0.6); }
+  .map-chip.active { color: #111826; background: #e8c77a; border-color: #e8c77a; }
+  .map-chip.sev-alta.active  { color: #111826; background: #e05a4e; border-color: #e05a4e; }
+  .map-chip.sev-media.active { color: #111826; background: #d9b354; border-color: #d9b354; }
+  .map-chip.sev-baixa.active { color: #111826; background: #8a93a6; border-color: #8a93a6; }
 </style>
 </head>
 <body>
@@ -475,6 +645,8 @@
     <div class="tabs">
       <span class="tab active" id="tab-feed" onclick="switchView('feed')">Feed</span>
       <span class="tab" id="tab-backlog" onclick="switchView('backlog')">Backlog<span class="tab-badge" id="backlog-badge"></span></span>
+      <span class="tab" id="tab-analise" onclick="switchView('analise')">Análise</span>
+      <span class="tab" id="tab-map" onclick="switchView('map')">Mapa 3D</span>
     </div>
     <span id="project-filter-chip"></span>
     <input id="search-box" type="text" placeholder="Buscar no feed..." oninput="onSearchInput(this.value)">
@@ -493,6 +665,77 @@
   </header>
   <div id="feed">
     <div class="empty">Aguardando alterações nos projetos monitorados...</div>
+  </div>
+
+  <div id="map-view" class="hidden">
+    <div id="map-canvas"></div>
+    <div id="map-tooltip" class="hidden"></div>
+
+    <div id="map-detail" class="hidden">
+      <div class="md-top">
+        <span class="proj-tag" id="md-project"></span>
+        <span class="md-close" onclick="closeMapDetail()">&times;</span>
+      </div>
+      <div class="md-file" id="md-file"></div>
+      <div class="md-meta" id="md-meta"></div>
+      <div class="md-label" id="md-label"></div>
+      <div class="md-sev" id="md-sev"></div>
+      <button class="md-go" onclick="mapGoToFeed()">Ver no feed</button>
+    </div>
+
+    <div id="map-bar">
+      <div class="row">
+        <div class="grp">
+          <span class="lbl">Projeto</span>
+          <div class="chips" id="map-project-chips"></div>
+        </div>
+        <div class="map-divider"></div>
+        <div class="grp">
+          <span class="lbl">Severidade</span>
+          <div class="chips" id="map-severity-chips"></div>
+        </div>
+      </div>
+      <div class="tl">
+        <span class="lbl">Linha do tempo</span>
+        <input type="range" id="map-timelapse" min="1" max="1" value="1" oninput="onMapTimelapse(this.value)">
+        <span id="map-tl-label">revisão 0/0</span>
+      </div>
+    </div>
+
+    <div id="map-empty" class="hidden">Sem atividade no histórico ainda — o mapa aparece quando houver commits, PRs ou alterações nos projetos monitorados.</div>
+  </div>
+
+  <div id="analytics-view" class="hidden">
+    <div class="an-stats" id="an-stats"></div>
+    <div class="an-card">
+      <div class="an-h">Severidade ao longo do tempo <span id="an-window" class="an-sub"></span></div>
+      <div class="an-hint">Quantas revisões de cada severidade por dia. Colunas mais altas e mais vermelhas = dias com mais problemas encontrados.</div>
+      <div id="an-sevchart"></div>
+      <div class="an-legend">
+        <span><i style="background:var(--err)"></i>alta</span>
+        <span><i style="background:var(--warn)"></i>média</span>
+        <span><i style="background:var(--muted-2)"></i>baixa</span>
+        <span><i style="background:var(--accent)"></i>sem achado</span>
+      </div>
+    </div>
+    <div class="an-grid">
+      <div class="an-card">
+        <div class="an-h">Arquivos hotspot <span class="an-sub">mais revisados</span></div>
+        <div class="an-hint">Arquivos que mais voltaram pra revisão — bons candidatos a refatorar. A faixa vermelha é a parte das revisões que teve achado de severidade alta.</div>
+        <div id="an-hotspots" class="an-hs"></div>
+      </div>
+      <div class="an-card">
+        <div class="an-h">Por projeto</div>
+        <div class="an-hint">Volume de revisões, achados de severidade alta e custo de LLM em cada pasta monitorada.</div>
+        <div id="an-projects" class="an-proj"></div>
+      </div>
+    </div>
+    <div class="an-card">
+      <div class="an-h">Origem das alterações</div>
+      <div class="an-hint">De onde veio cada alteração revisada: um pull request, um commit no git, ou uma edição feita direto nos arquivos da pasta.</div>
+      <div id="an-source" class="an-source"></div>
+    </div>
+    <div id="an-empty" class="empty hidden">Ainda não há dados suficientes — o painel se preenche conforme as revisões acontecem.</div>
   </div>
 </main>
 
@@ -712,13 +955,24 @@ let showResolved = false;   // so vale para o backlog
 
 function switchView(mode) {
   viewMode = mode;
+  const isMap = mode === "map";
+  const isAnalise = mode === "analise";
+  const isList = mode === "feed" || mode === "backlog";
   document.getElementById("tab-feed").classList.toggle("active", mode === "feed");
   document.getElementById("tab-backlog").classList.toggle("active", mode === "backlog");
+  document.getElementById("tab-analise").classList.toggle("active", isAnalise);
+  document.getElementById("tab-map").classList.toggle("active", isMap);
   document.getElementById("critical-toggle").classList.toggle("hidden", mode !== "feed");
   document.getElementById("resolved-toggle").classList.toggle("hidden", mode !== "backlog");
   document.getElementById("patterns-btn").classList.toggle("hidden", mode !== "backlog");
+  document.getElementById("search-box").classList.toggle("hidden", !isList);
+  document.getElementById("feed").classList.toggle("hidden", !isList);
+  document.getElementById("map-view").classList.toggle("hidden", !isMap);
+  document.getElementById("analytics-view").classList.toggle("hidden", !isAnalise);
   lastRenderKey = "";
   if (currentState) render(currentState);
+  if (isMap) openMap3D();
+  if (isAnalise) loadAnalytics();
 }
 
 function toggleShowResolved() {
@@ -1252,9 +1506,616 @@ function toggleCriticalFilter() {
   if (currentState) render(currentState);
 }
 
+/* ======================================================================
+   Aba Análise — dashboard sobre os agregados que o backend já coleta
+   (window.pywebview.api.get_analytics). Só adiciona código.
+   ====================================================================== */
+let analyticsLoading = false;
+let lastAnalyticsAt = 0;
+
+async function loadAnalytics(force) {
+  if (analyticsLoading) return;
+  if (!force && Date.now() - lastAnalyticsAt < 8000) return;
+  analyticsLoading = true;
+  try {
+    const a = await window.pywebview.api.get_analytics();
+    lastAnalyticsAt = Date.now();
+    renderAnalytics(a);
+  } catch (e) {
+    /* bridge ainda subindo */
+  } finally {
+    analyticsLoading = false;
+  }
+}
+
+function anStackedChart(series) {
+  const W = 720, H = 120, n = series.length;
+  const max = Math.max(1, ...series.map(d => d.alta + d.media + d.baixa + d.nenhuma));
+  const bw = W / n;
+  const cols = { nenhuma: "var(--accent)", baixa: "var(--muted-2)", media: "var(--warn)", alta: "var(--err)" };
+  let r = "";
+  series.forEach((d, i) => {
+    let y = H;
+    for (const k of ["nenhuma", "baixa", "media", "alta"]) {
+      if (!d[k]) continue;
+      const bh = (d[k] / max) * (H - 2);
+      y -= bh;
+      r += `<rect x="${(i * bw + 0.5).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="${cols[k]}"/>`;
+    }
+  });
+  const first = series[0] && series[0].day.slice(5);
+  const mid = series[n >> 1] && series[n >> 1].day.slice(5);
+  const last = series[n - 1] && series[n - 1].day.slice(5);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" height="120">${r}</svg>`
+    + `<div class="an-xaxis"><span>${first || ""}</span><span>${mid || ""}</span><span>${last || ""}</span></div>`;
+}
+
+function renderAnalytics(a) {
+  if (!a) return;
+  const t = a.totals || {};
+  const noData = !t.reviews;
+  document.getElementById("an-empty").classList.toggle("hidden", !noData);
+
+  document.getElementById("an-window").textContent =
+    "· últimos " + (t.window_days || 30) + " dias";
+
+  const AN_IC = {
+    reviews: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+    flag: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    cost: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    time: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  };
+  document.getElementById("an-stats").innerHTML = [
+    ["reviews", "ok", "Revisões (total)", t.reviews || 0, "",
+      "Alterações que o watcher mandou pro LLM revisar desde o começo do monitoramento."],
+    ["flag", "warn", "Achados (alta+média)", t.flagged || 0, t.flagged ? "warn" : "",
+      "Revisões em que o LLM apontou um problema de severidade alta ou média — o que entra no Backlog."],
+    ["cost", "", "Custo estimado", fmtUsd(t.cost_usd || 0), "",
+      "Gasto acumulado com a API do LLM (OpenAI), estimado pelos tokens de cada revisão. Zero se usa o Claude CLI."],
+    ["time", "", "Tempo médio", fmtDuration(t.avg_dur || 0), "",
+      "Duração média de uma revisão, do disparo até a resposta do LLM."],
+  ].map(([ic, icCls, k, v, vCls, d]) => `<div class="an-stat">
+      <div class="an-stat-top">
+        <span class="an-stat-ic ${icCls}"><svg class="icon" viewBox="0 0 24 24">${AN_IC[ic]}</svg></span>
+        <span class="k">${k}</span>
+      </div>
+      <div class="v ${vCls}">${v}</div>
+      <div class="d">${d}</div>
+    </div>`).join("");
+
+  document.getElementById("an-sevchart").innerHTML = anStackedChart(a.series || []);
+
+  const hs = a.hotspots || [];
+  const hsMax = Math.max(1, ...hs.map(f => f.count));
+  document.getElementById("an-hotspots").innerHTML = hs.length ? hs.map(f => {
+    const pct = (f.count / hsMax) * 100;
+    const altaPct = f.count ? (f.alta / f.count) * pct : 0;
+    return `<div class="an-hs-row">
+      <span class="an-hs-file" title="${esc(f.project)} / ${esc(f.file)}">${esc(f.file)}</span>
+      <span class="an-hs-bar"><span class="an-hs-fill" style="width:${pct.toFixed(1)}%"></span><span class="an-hs-fill alta" style="width:${altaPct.toFixed(1)}%"></span></span>
+      <span class="an-hs-n">${f.count}${f.alta ? ` <span class="warn">${f.alta}⚠</span>` : ""}</span>
+    </div>`;
+  }).join("") : `<div class="an-sub">sem dados ainda</div>`;
+
+  const bp = a.by_project || [];
+  document.getElementById("an-projects").innerHTML = bp.length ? bp.map(p => `
+    <div class="an-proj-row">
+      <span class="pname" title="${esc(p.project)}">${esc(p.project)}</span>
+      <span class="pnum">${p.reviews} rev</span>
+      <span class="pnum alta">${p.alta} alta</span>
+      <span class="pnum">${fmtUsd(p.cost)}</span>
+    </div>`).join("") : `<div class="an-sub">sem dados ainda</div>`;
+
+  const s = a.by_source || {};
+  document.getElementById("an-source").innerHTML = [
+    ["Pull Requests", s.pr || 0],
+    ["Commits", s.commit || 0],
+    ["Edição na pasta", s.file || 0],
+  ].map(([k, v]) => `<div class="src"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+}
+
+/* ======================================================================
+   Mapa 3D ("Git City") — aba nova. Só adiciona código: consome o mesmo
+   currentState.feed que alimenta o Feed/Backlog, re-agrupado por
+   projeto -> arquivo -> eventos em ordem cronológica. Não toca em
+   toggleMaster / filterByProject / resolveBacklogItem / window.pywebview.api.
+   ====================================================================== */
+const MAP_SEV_HEX = { alta: 0xe05a4e, media: 0xd9b354, baixa: 0x6c7688 };
+const MAP_DEFAULT_HEX = 0x5b8def;
+const MAP_SEV_LABELS = { alta: "alta", media: "média", baixa: "baixa" };
+
+let map3d = null;                 // { THREE, scene, camera, renderer, controls, raf, buildingMeshes, cityGroup }
+let mapLoading = false;
+let mapProjectFilter = null;
+let mapSeverityFilter = null;
+let mapTimelapseValue = Infinity;
+let mapSelected = null;
+let mapDataSig = "";
+
+const MAP_TYPE_LABELS = { pr: "Pull Request", commit: "Commit", file: "Alteração na pasta" };
+
+/* Tira a marcação de markdown da revisão do LLM pra virar texto corrido
+   (o tooltip / painel do mapa mostram texto puro, não markdown). */
+function mapPlainText(src) {
+  return String(src || "")
+    .replace(/```[\s\S]*?```/g, " ")        // blocos de código
+    .replace(/`([^`]+)`/g, "$1")            // código inline
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links/imagens -> texto
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")     // títulos
+    .replace(/^\s{0,3}>\s?/gm, "")          // citações
+    .replace(/^\s*[-*+]\s+/gm, "")          // marcadores de lista
+    .replace(/^\s*\d+[.)]\s+/gm, "")        // listas numeradas
+    .replace(/\*\*([^*]+)\*\*/g, "$1")      // negrito
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")          // itálico
+    .replace(/(^|\s)_([^_]+)_(?=\s|$)/g, "$1$2")
+    .replace(/^\s*[-*_]{3,}\s*$/gm, " ")    // linhas horizontais
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* Agrega o histórico de eventos (PRs, commits e alterações diretas na pasta)
+   por projeto -> arquivo, com um índice cronológico global (order) para o
+   timelapse. */
+function buildMapEvents() {
+  const feed = (currentState && currentState.feed) || [];
+  const evs = feed.filter(c => c.project && (c.file || c.review));
+  evs.sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
+  return evs.map((c, i) => {
+    const raw = c.file || "(sem arquivo)";
+    let fileKey = raw;
+    if (/[\/\\]/.test(raw) || /\.[A-Za-z0-9]{1,6}$/.test(raw)) {
+      fileKey = raw.split(/[\/\\]/).pop();
+    } else if (raw.length > 46) {
+      fileKey = raw.slice(0, 44) + "…";
+    }
+    const type = c.source === "pr" ? "pr" : c.source === "commit" ? "commit" : "file";
+    const clean = mapPlainText(c.review);
+    const label = clean ? (clean.length > 200 ? clean.slice(0, 200).trimEnd() + "…" : clean) : raw;
+    return {
+      project: c.project || "(sem projeto)",
+      file: fileKey,
+      fileFull: raw,
+      type,
+      typeLabel: MAP_TYPE_LABELS[type],
+      label,
+      severity: c.severity || null,
+      time: fmtTime(c.ts),
+      order: i + 1,
+    };
+  });
+}
+
+function mapSig(events) {
+  const monitored = ((currentState && currentState.projects) || []).map(p => p.name).join(",");
+  return monitored + "::" + events.map(e => e.project + "|" + e.file + "|" + e.severity + "|" + e.order).join(";");
+}
+
+async function openMap3D() {
+  const events = buildMapEvents();
+  const emptyEl = document.getElementById("map-empty");
+  emptyEl.classList.toggle("hidden", events.length > 0);
+  if (!events.length) return;
+  if (mapLoading) return;
+
+  if (!map3d) {
+    mapLoading = true;
+    try {
+      const THREE = await import("three");
+      const { OrbitControls } = await import("three/addons/controls/OrbitControls.js");
+      initMap3D(THREE, OrbitControls);
+    } catch (e) {
+      emptyEl.textContent = "Não foi possível carregar o three.js (precisa de rede na primeira vez): " + e;
+      emptyEl.classList.remove("hidden");
+      mapLoading = false;
+      return;
+    }
+    mapLoading = false;
+  }
+
+  rebuildMapCity(events);
+  renderMapChips(events);
+  mapDataSig = mapSig(events);
+  // O container fica display:none enquanto outra aba está ativa -> clientWidth
+  // é 0 até ele aparecer. Força o resize já no frame em que a aba abre.
+  requestAnimationFrame(resizeMap3D);
+  setTimeout(resizeMap3D, 160);
+}
+
+function initMap3D(THREE, OrbitControls) {
+  const el = document.getElementById("map-canvas");
+  const w = el.clientWidth || 800, h = el.clientHeight || 600;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  el.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x060a14);
+  scene.fog = new THREE.FogExp2(0x060a14, 0.006);
+
+  const camera = new THREE.PerspectiveCamera(65, w / h, 0.1, 800);
+  camera.position.set(2, 15, 22);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 4, 0);
+  controls.enableDamping = true;
+  controls.maxPolarAngle = Math.PI / 2 - 0.1;
+  controls.minDistance = 10;
+  controls.maxDistance = 150;
+
+  // As torres usam MeshBasicMaterial (não-iluminado); estas luzes só afetam
+  // o chão, dando um leve gradiente noturno.
+  scene.add(new THREE.HemisphereLight(0x2a3a55, 0x05070c, 0.6));
+  const moon = new THREE.DirectionalLight(0x8fb0ff, 0.35);
+  moon.position.set(-30, 50, -20);
+  scene.add(moon);
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshStandardMaterial({ color: 0x0a0e18, roughness: 1 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+
+  const grid = new THREE.GridHelper(400, 80, 0x1a2540, 0x121a2c);
+  grid.position.y = 0.02;
+  scene.add(grid);
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const pickBlock = (e) => {
+    if (!map3d || !map3d.buildingMeshes) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(map3d.buildingMeshes.filter(m => m.visible));
+    return hits.length ? hits[0].object.userData.record : null;
+  };
+
+  renderer.domElement.addEventListener("click", (e) => {
+    setMapSelected(pickBlock(e));
+  });
+
+  // Hover -> tooltip com a alteração daquele bloco (PR / commit / edição na pasta)
+  const tip = document.getElementById("map-tooltip");
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    const rec = pickBlock(e);
+    renderer.domElement.style.cursor = rec ? "pointer" : "";
+    if (!rec) { tip.classList.add("hidden"); return; }
+    tip.innerHTML =
+      `<b>${esc(rec.project)}</b> · <span class="t-file">${esc(rec.fileFull || rec.file)}</span><br>` +
+      `<span class="t-type">${esc(rec.typeLabel)}</span>` +
+      (rec.severity ? ` <span class="t-sev t-sev-${rec.severity}">${esc(MAP_SEV_LABELS[rec.severity])}</span>` : "") +
+      (rec.time ? ` · ${esc(rec.time)}` : "") +
+      (rec.label ? `<br><span class="t-msg">${esc(rec.label)}</span>` : "");
+    const host = document.getElementById("map-view").getBoundingClientRect();
+    let x = e.clientX - host.left + 14, y = e.clientY - host.top + 14;
+    tip.classList.remove("hidden");
+    if (x + tip.offsetWidth > host.width - 8) x = e.clientX - host.left - tip.offsetWidth - 14;
+    if (y + tip.offsetHeight > host.height - 8) y = e.clientY - host.top - tip.offsetHeight - 14;
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  });
+  renderer.domElement.addEventListener("pointerleave", () => {
+    tip.classList.add("hidden");
+    renderer.domElement.style.cursor = "";
+  });
+
+  window.addEventListener("resize", resizeMap3D);
+
+  map3d = { THREE, scene, camera, renderer, controls, raf: 0,
+            buildingMeshes: [], markerMeshes: [], cityGroup: null,
+            texCache: {}, clock: new THREE.Clock() };
+
+  const animate = () => {
+    map3d.raf = requestAnimationFrame(animate);
+    if (viewMode !== "map") return;   // não gasta GPU com a aba escondida
+    controls.update();
+    const t = map3d.clock.getElapsedTime();
+    map3d.markerMeshes.forEach((m, i) => {
+      m.rotation.y = t + i;
+      m.position.y = m.userData.baseY + Math.sin(t * 2 + i) * 0.25;
+    });
+    renderer.render(scene, camera);
+  };
+  animate();
+}
+
+function resizeMap3D() {
+  if (!map3d) return;
+  const el = document.getElementById("map-canvas");
+  const w = el.clientWidth, h = el.clientHeight;
+  if (!w || !h) return;
+  map3d.camera.aspect = w / h;
+  map3d.camera.updateProjectionMatrix();
+  map3d.renderer.setSize(w, h);
+}
+
+function mapRecordVisible(rec) {
+  if (mapProjectFilter && rec.project !== mapProjectFilter) return false;
+  if (mapSeverityFilter && rec.severity !== mapSeverityFilter) return false;
+  if (rec.order > mapTimelapseValue) return false;
+  return true;
+}
+
+function refreshMapVisibility() {
+  if (!map3d || !map3d.buildingMeshes) return;
+  map3d.buildingMeshes.forEach(m => { m.visible = mapRecordVisible(m.userData.record); });
+}
+
+function mapLabelSprite(text) {
+  const THREE = map3d.THREE;
+  const canvas = document.createElement("canvas");
+  canvas.width = 320; canvas.height = 72;
+  const ctx = canvas.getContext("2d");
+  ctx.font = "700 30px Consolas, 'Cascadia Mono', monospace";
+  ctx.fillStyle = "#e8c77a";
+  ctx.textAlign = "center";
+  ctx.shadowColor = "#e8c77a";
+  ctx.shadowBlur = 12;
+  ctx.fillText((text || "").toUpperCase(), 160, 46);
+  const tex = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sprite.scale.set(7, 1.6, 1);
+  return sprite;
+}
+
+/* Textura de "janelas acesas" para as fachadas — grade de quadradinhos,
+   ~65% acesos na cor viva, ~35% quase pretos. Uma por cor (cache), com
+   RepeatWrapping. Vai num MeshBasicMaterial: brilho constante, não some
+   contra o fundo escuro como um material physically-lit sumiria. */
+function mapWindowTexture(hex) {
+  const THREE = map3d.THREE;
+  const key = "wt_" + hex;
+  if (map3d.texCache[key]) return map3d.texCache[key];
+  const c = document.createElement("canvas");
+  c.width = 32; c.height = 64;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#0c1220";
+  ctx.fillRect(0, 0, 32, 64);
+  const col = new THREE.Color(hex);
+  const r = col.r * 255 | 0, g = col.g * 255 | 0, b = col.b * 255 | 0;
+  for (let y = 2; y < 64; y += 5) {
+    for (let x = 2; x < 32; x += 6) {
+      const lit = Math.random() > 0.35;
+      ctx.fillStyle = lit
+        ? `rgba(${r},${g},${b},${0.55 + Math.random() * 0.45})`
+        : "rgba(10,14,22,0.9)";
+      ctx.fillRect(x, y, 3, 3);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  map3d.texCache[key] = tex;
+  return tex;
+}
+
+function rebuildMapCity(events) {
+  const THREE = map3d.THREE;
+  if (map3d.cityGroup) {
+    map3d.scene.remove(map3d.cityGroup);
+    map3d.cityGroup.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      // Materiais são recriados a cada rebuild -> descarta. As texturas de
+      // janela ficam no texCache (compartilhadas) -> NÃO descarta aqui.
+      if (o.material) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+          if (m.isSpriteMaterial && m.map) m.map.dispose();
+          m.dispose();
+        });
+      }
+    });
+  }
+  const group = new THREE.Group();
+  map3d.buildingMeshes = [];
+  map3d.markerMeshes = [];
+
+  // Só projetos com eventos viram distrito (torres). Pastas monitoradas sem
+  // commit/PR recente não têm o que empilhar -- o skyline de preenchimento
+  // cobre o resto do quadro.
+  const projects = [...new Set(events.map(r => r.project))];
+  const cols = Math.max(1, Math.ceil(Math.sqrt(projects.length)));
+  const districtSize = 15, gap = 3;
+  const total = cols * (districtSize + gap) - gap;
+  const start = -total / 2 + districtSize / 2;
+
+  // ---- Skyline de preenchimento: ~2200 torres não-interativas ----
+  const fillerMat = new THREE.MeshBasicMaterial({ map: mapWindowTexture(0x3fae6c) });
+  const fillerGeo = new THREE.BoxGeometry(1, 1, 1);
+  const fillerSpan = total + 130;
+  const excl = total / 2 + 3;
+  for (let i = 0; i < 2200; i++) {
+    const fx = (Math.random() - 0.5) * fillerSpan;
+    const fz = (Math.random() - 0.5) * fillerSpan;
+    if (Math.abs(fx) < excl && Math.abs(fz) < excl) continue;
+    const falloff = 1 - Math.min(1, Math.hypot(fx, fz) / (fillerSpan * 0.75));
+    const fh = Math.max(0.8, (1 + Math.random() * 10) * (0.4 + falloff * 0.8));
+    const fw = 0.55 + Math.random() * 0.6;
+    const filler = new THREE.Mesh(fillerGeo, fillerMat);
+    filler.scale.set(fw, fh, fw);
+    filler.position.set(fx, fh / 2, fz);
+    filler.matrixAutoUpdate = false;
+    filler.updateMatrix();
+    group.add(filler);
+  }
+
+  projects.forEach((proj, pi) => {
+    const gx = pi % cols, gy = Math.floor(pi / cols);
+    const cx = start + gx * (districtSize + gap);
+    const cz = start + gy * (districtSize + gap);
+
+    const label = mapLabelSprite(proj);
+    label.position.set(cx, 1.4, cz - districtSize / 2 - 1.6);
+    group.add(label);
+
+    const files = [...new Set(events.filter(r => r.project === proj).map(r => r.file))];
+    const fcols = Math.ceil(Math.sqrt(files.length)) + 1;
+    const cellSize = districtSize / fcols;
+    files.forEach((file, fi) => {
+      const fx = fi % fcols, fy = Math.floor(fi / fcols);
+      const jx = (Math.random() - 0.5) * cellSize * 0.18;
+      const jz = (Math.random() - 0.5) * cellSize * 0.18;
+      const bx = cx - districtSize / 2 + cellSize * (fx + 0.5) + jx;
+      const bz = cz - districtSize / 2 + cellSize * (fy + 0.5) + jz;
+      const blockH = 1, blockGap = 0.1;
+      const evs = events
+        .filter(r => r.project === proj && r.file === file)
+        .sort((a, b) => a.order - b.order);
+      const hasAlta = evs.some(e => e.severity === "alta");
+      const hasMedia = evs.some(e => e.severity === "media");
+      const towerHex = hasAlta ? MAP_SEV_HEX.alta : hasMedia ? MAP_SEV_HEX.media : MAP_DEFAULT_HEX;
+      const winTex = mapWindowTexture(towerHex);
+      const side = cellSize * 0.72;
+      evs.forEach((ev, bi) => {
+        const y0 = bi * (blockH + blockGap);
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(side, blockH, side),
+          new THREE.MeshBasicMaterial({ map: winTex })
+        );
+        mesh.position.set(bx, y0 + blockH / 2, bz);
+        mesh.userData.record = ev;
+        mesh.visible = mapRecordVisible(ev);
+        group.add(mesh);
+        map3d.buildingMeshes.push(mesh);
+      });
+
+      // Marcador de crítico: octaedro + anel dourado/vermelho girando.
+      if (hasAlta) {
+        const topY = evs.length * (blockH + blockGap);
+        const mk = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.5, 0),
+          new THREE.MeshBasicMaterial({ color: 0xe8c77a, transparent: true, opacity: 0.95 })
+        );
+        mk.position.set(bx, topY + 2.2, bz);
+        mk.userData.baseY = topY + 2.2;
+        group.add(mk);
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.6, 0.74, 4),
+          new THREE.MeshBasicMaterial({ color: MAP_SEV_HEX.alta, transparent: true, opacity: 0.7, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.copy(mk.position);
+        ring.userData.baseY = mk.userData.baseY;
+        group.add(ring);
+        map3d.markerMeshes.push(mk, ring);
+      }
+    });
+  });
+
+  map3d.scene.add(group);
+  map3d.cityGroup = group;
+
+  const maxOrder = Math.max(1, ...events.map(e => e.order));
+  const slider = document.getElementById("map-timelapse");
+  slider.max = String(maxOrder);
+  if (mapTimelapseValue === Infinity || mapTimelapseValue > maxOrder) mapTimelapseValue = maxOrder;
+  slider.value = String(mapTimelapseValue);
+  document.getElementById("map-tl-label").textContent = "revisão " + mapTimelapseValue + "/" + maxOrder;
+  refreshMapVisibility();
+
+  if (mapSelected && !events.some(e =>
+      e.order === mapSelected.order && e.project === mapSelected.project && e.file === mapSelected.file)) {
+    setMapSelected(null);
+  }
+}
+
+function renderMapChips(events) {
+  const projects = [...new Set(events.map(r => r.project))];
+  const pc = document.getElementById("map-project-chips");
+  pc.innerHTML =
+    `<span class="map-chip${mapProjectFilter ? "" : " active"}" data-proj="">Todos projetos</span>` +
+    projects.map(p =>
+      `<span class="map-chip${mapProjectFilter === p ? " active" : ""}" data-proj="${esc(p)}">${esc(p)}</span>`
+    ).join("");
+  pc.querySelectorAll(".map-chip").forEach(chip => {
+    chip.onclick = () => {
+      const p = chip.dataset.proj;
+      mapProjectFilter = (!p || mapProjectFilter === p) ? null : p;
+      renderMapChips(events);
+      refreshMapVisibility();
+    };
+  });
+
+  const sc = document.getElementById("map-severity-chips");
+  const sevs = [["", "Todas severidades"], ["alta", "Alta"], ["media", "Média"], ["baixa", "Baixa"]];
+  sc.innerHTML = sevs.map(([v, lbl]) => {
+    const active = v ? mapSeverityFilter === v : !mapSeverityFilter;
+    return `<span class="map-chip sev-${v || "all"}${active ? " active" : ""}" data-sev="${v}">${lbl}</span>`;
+  }).join("");
+  sc.querySelectorAll(".map-chip").forEach(chip => {
+    chip.onclick = () => {
+      const v = chip.dataset.sev;
+      mapSeverityFilter = (!v || mapSeverityFilter === v) ? null : v;
+      renderMapChips(events);
+      refreshMapVisibility();
+    };
+  });
+}
+
+function onMapTimelapse(v) {
+  mapTimelapseValue = Number(v);
+  const max = document.getElementById("map-timelapse").max;
+  document.getElementById("map-tl-label").textContent = "revisão " + mapTimelapseValue + "/" + max;
+  refreshMapVisibility();
+}
+
+function setMapSelected(rec) {
+  mapSelected = rec;
+  const panel = document.getElementById("map-detail");
+  if (!rec) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  document.getElementById("md-project").textContent = rec.project;
+  document.getElementById("md-file").textContent = rec.fileFull || rec.file;
+  document.getElementById("md-meta").textContent =
+    (rec.typeLabel || "Commit") + (rec.time ? " · " + rec.time : "");
+  document.getElementById("md-label").textContent = rec.label || "";
+  document.getElementById("md-sev").textContent =
+    "severidade: " + (rec.severity ? MAP_SEV_LABELS[rec.severity] : "nenhuma");
+}
+
+function closeMapDetail() { setMapSelected(null); }
+
+/* Troca pra aba Feed já filtrada pelo projeto/arquivo do bloco clicado.
+   Funcao nova -- nao altera filterByProject/onSearchInput. */
+function goToFeedFromMap(project, fileText) {
+  activeProjectFilter = project || null;
+  searchQuery = (fileText || "").trim().toLowerCase();
+  const box = document.getElementById("search-box");
+  if (box) box.value = fileText || "";
+  switchView("feed");
+}
+
+function mapGoToFeed() {
+  if (!mapSelected) return;
+  const rec = mapSelected;
+  setMapSelected(null);
+  goToFeedFromMap(rec.project, rec.fileFull || rec.file);
+}
+
+/* Enquanto a aba Mapa 3D está aberta, reconstrói a cidade só quando o
+   histórico realmente mudou (evita rebuild a cada tick de 3s). */
+function maybeRefreshMap() {
+  if (viewMode !== "map" || !map3d || mapLoading) return;
+  const events = buildMapEvents();
+  const sig = mapSig(events);
+  if (sig === mapDataSig) return;
+  mapDataSig = sig;
+  document.getElementById("map-empty").classList.toggle("hidden", events.length > 0);
+  if (!events.length) return;
+  rebuildMapCity(events);
+  renderMapChips(events);
+}
+
 window.addEventListener("pywebviewready", () => {
   tick();
   setInterval(tick, 3000);
+  setInterval(maybeRefreshMap, 3000);
+  setInterval(() => { if (viewMode === "analise") loadAnalytics(); }, 10000);
 });
 </script>
 </body>

@@ -58,6 +58,50 @@ class WatcherState:
         # a virada de meia-noite se resolve sozinha em snapshot() sem precisar
         # de um timer de fundo.
         self.daily_counts = {}
+        # Agregados ricos pra aba Analise (ver analytics_snapshot). Preenchidos
+        # em apply() a partir de todo o events.jsonl no boot -> cobrem o
+        # historico inteiro que ainda esta no arquivo (nao so o teto do feed).
+        self.stats = {
+            "by_day": {},      # "YYYY-MM-DD" -> {alta,media,baixa,nenhuma,cost,dur_sum,dur_n}
+            "by_project": {},  # nome -> {reviews,alta,media,baixa,cost,dur_sum,dur_n}
+            "by_file": {},     # "proj\x00file" -> {project,file,count,alta,media,last_ts}
+            "by_source": {"pr": 0, "commit": 0, "file": 0},
+        }
+
+    def _stat_bump(self, project, file, ts, severity, cost_usd, duration, source):
+        st = self.stats
+        sev = severity if severity in ("alta", "media", "baixa") else "nenhuma"
+        day = (ts or "")[:10]
+        if day:
+            d = st["by_day"].setdefault(
+                day, {"alta": 0, "media": 0, "baixa": 0, "nenhuma": 0,
+                      "cost": 0.0, "dur_sum": 0.0, "dur_n": 0})
+            d[sev] += 1
+            d["cost"] += cost_usd
+            if duration:
+                d["dur_sum"] += duration
+                d["dur_n"] += 1
+        p = st["by_project"].setdefault(
+            project, {"reviews": 0, "alta": 0, "media": 0, "baixa": 0,
+                      "cost": 0.0, "dur_sum": 0.0, "dur_n": 0})
+        p["reviews"] += 1
+        if sev != "nenhuma":
+            p[sev] += 1
+        p["cost"] += cost_usd
+        if duration:
+            p["dur_sum"] += duration
+            p["dur_n"] += 1
+        if source in st["by_source"]:
+            st["by_source"][source] += 1
+        fk = f"{project}\x00{file}"
+        f = st["by_file"].setdefault(
+            fk, {"project": project, "file": file, "count": 0,
+                 "alta": 0, "media": 0, "last_ts": ""})
+        f["count"] += 1
+        if sev in ("alta", "media"):
+            f[sev] += 1
+        if ts:
+            f["last_ts"] = max(f["last_ts"], ts)
 
     @staticmethod
     def current_projects():
@@ -100,6 +144,11 @@ class WatcherState:
                 if not historical:
                     self.session_count += 1
                     self.review_seconds += float(event.get("duration") or 0)
+                self._stat_bump(
+                    project, event.get("file", "?"), event.get("ts", ""),
+                    severity, cost_usd, float(event.get("duration") or 0),
+                    event.get("source", "file"),
+                )
                 self._resolve(project, event.get("file"), {
                     "status": "done",
                     "source": event.get("source", "file"),
@@ -132,6 +181,10 @@ class WatcherState:
                     "severity": "alta", "findings": event.get("findings", []),
                     "review": "",
                 })
+                self._stat_bump(
+                    project, event.get("file", "?"), event.get("ts", ""),
+                    "alta", 0.0, 0.0, event.get("source", "file"),
+                )
                 kinds = ", ".join(sorted({f.get("kind", "?") for f in event.get("findings", [])}))
                 self._push_backlog(
                     project, event.get("file", "?"), event.get("ts", ""),
@@ -269,6 +322,52 @@ class WatcherState:
                          resolved_at=backlog_status.get(item["id"], {}).get("at"))
                     for item in self.backlog_items
                 ],
+            }
+
+    def analytics_snapshot(self, days=30):
+        with self.lock:
+            st = self.stats
+            series = []
+            for i in range(days - 1, -1, -1):
+                day = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                b = st["by_day"].get(day, {})
+                series.append({
+                    "day": day,
+                    "alta": b.get("alta", 0), "media": b.get("media", 0),
+                    "baixa": b.get("baixa", 0), "nenhuma": b.get("nenhuma", 0),
+                    "cost": round(b.get("cost", 0.0), 4),
+                    "avg_dur": round(b["dur_sum"] / b["dur_n"], 1) if b.get("dur_n") else 0,
+                })
+
+            def _proj(k, v):
+                return {
+                    "project": k, "reviews": v["reviews"],
+                    "alta": v["alta"], "media": v["media"], "baixa": v["baixa"],
+                    "cost": round(v["cost"], 4),
+                    "avg_dur": round(v["dur_sum"] / v["dur_n"], 1) if v["dur_n"] else 0,
+                }
+            by_project = sorted(
+                (_proj(k, v) for k, v in st["by_project"].items()),
+                key=lambda x: -x["reviews"],
+            )
+            hotspots = sorted(
+                st["by_file"].values(),
+                key=lambda x: (-x["count"], -x["alta"], -x["media"]),
+            )[:12]
+            dur_n = sum(v["dur_n"] for v in st["by_project"].values())
+            dur_s = sum(v["dur_sum"] for v in st["by_project"].values())
+            return {
+                "series": series,
+                "by_project": by_project,
+                "hotspots": [dict(h) for h in hotspots],
+                "by_source": dict(st["by_source"]),
+                "totals": {
+                    "reviews": self.total_count,
+                    "cost_usd": round(self.total_cost_usd, 4),
+                    "avg_dur": round(dur_s / dur_n, 1) if dur_n else 0,
+                    "flagged": sum(v["alta"] + v["media"] for v in st["by_project"].values()),
+                    "window_days": days,
+                },
             }
 
     @staticmethod

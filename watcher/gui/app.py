@@ -39,6 +39,19 @@ if not os.path.isfile(ICON_FILE):
     ICON_FILE = os.path.join(HERE, "icon.ico")
 
 
+def _mark_unserializable(*objs):
+    """Marca objetos pra o pywebview NAO os varrer ao montar window.pywebview.api
+    (ver comentario em App.__init__). Ignora None e objetos que nao aceitam
+    atributo novo."""
+    for obj in objs:
+        if obj is None:
+            continue
+        try:
+            obj._serializable = False
+        except (AttributeError, TypeError):
+            pass
+
+
 class App:
     def __init__(self):
         self.state = WatcherState()
@@ -48,6 +61,17 @@ class App:
         self.window = None
         self.tray = None
         self._win_pos = None
+        # A instancia de App e passada como js_api pro pywebview, que varre
+        # recursivamente os atributos publicos dela pra montar window.pywebview.api.
+        # Nao pode descer em self.window / self.tray / self.state: self.window
+        # embrulha o form WinForms (.NET), e a varredura entra num laco infinito
+        # em native.AccessibilityObject.Bounds.Empty.Empty... travando a UI thread
+        # (janela nunca aparece, so a bandeja). Marcar como nao-serializavel faz o
+        # pywebview pular esses atributos -- os metodos expostos (get_state, etc.)
+        # continuam normais, sao atributos de App, nao de App.state.
+        _mark_unserializable(
+            self.state, self.stop_flag, self.watcher_thread, self.watcher_stop_event
+        )
         # Resultados de chamadas de LLM sob demanda (ask/patterns/summary) --
         # ver _run_async: essas chamadas do bridge NUNCA podem bloquear ate
         # o LLM responder, senao travam a thread da UI do WinForms pela
@@ -65,6 +89,7 @@ class App:
         self.watcher_thread = threading.Thread(
             target=watcher_main, args=(self.watcher_stop_event,), daemon=True
         )
+        _mark_unserializable(self.watcher_stop_event, self.watcher_thread)
         self.watcher_thread.start()
 
     def watcher_alive(self):
@@ -87,6 +112,11 @@ class App:
 
     def get_state(self):
         return self.state.snapshot(self.watcher_alive())
+
+    def get_analytics(self):
+        """Agregados pra aba Analise. Payload separado de get_state() de
+        proposito -- e maior e so e consultado quando a aba esta aberta."""
+        return self.state.analytics_snapshot()
 
     def _run_async(self, fn):
         """Roda fn() (sem argumentos) numa thread separada e devolve um
@@ -522,6 +552,7 @@ class App:
         ).start()
 
         self.tray = setup_tray(self)
+        _mark_unserializable(self.tray)
 
         win_w, win_h = 1180, 760
         primary_screen = next(
@@ -540,6 +571,9 @@ class App:
             width=win_w, height=win_h, x=win_x, y=win_y, screen=primary_screen,
             min_size=(900, 600), hidden=True,
         )
+        # Critico: sem isso o pywebview varre self.window ao injetar o bridge e
+        # entra em recursao infinita no form .NET, travando a UI thread.
+        _mark_unserializable(self.window)
         self.window.events.closing += self.on_closing
 
         if "--show" in sys.argv:
