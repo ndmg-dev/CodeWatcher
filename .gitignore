@@ -14,3 +14,11 @@ events.jsonl
 control.json
 seen_commits.json
 seen_prs.json
+
+# Prints crus do painel: contem dados reais (segredos, nomes de clientes).
+# Sanitizar antes de versionar qualquer um.
+screenshots/
+
+# Arquivos de design/handoff soltos na raiz -- referencia local, nao do repo
+/CodeWatcher Redesign.dc.html
+/prompt_para_claude_code.md
