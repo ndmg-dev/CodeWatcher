@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="disc" cx="50%" cy="42%" r="65%">
+      <stop offset="0" stop-color="#1a1e26"/>
+      <stop offset="1" stop-color="#0f1115"/>
+    </radialGradient>
+    <clipPath id="cB"><circle cx="41" cy="32" r="28"/></clipPath>
+    <clipPath id="band"><rect x="0" y="21.5" width="64" height="21"/></clipPath>
+  </defs>
+  <circle cx="32" cy="32" r="28.5" fill="url(#disc)"/>
+  <circle cx="32" cy="32" r="28" fill="none" stroke="#4ade80" stroke-width="3"/>
+  <g clip-path="url(#band)">
+    <g clip-path="url(#cB)">
+      <circle cx="23" cy="32" r="28" fill="#4ade80"/>
+    </g>
+  </g>
+  <circle cx="32" cy="32" r="7.6" fill="#0f1115"/>
+  <circle cx="32" cy="32" r="3.9" fill="#191e27"/>
+  <circle cx="30.4" cy="30.4" r="1.4" fill="#ffffff" fill-opacity="0.92"/>
+  <circle cx="33.4" cy="33" r="0.6" fill="#ffffff" fill-opacity="0.55"/>
+</svg>
